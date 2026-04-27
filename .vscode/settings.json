@@ -1,0 +1,22 @@
+{
+  "sqltools.connections": [
+    {
+      "mysqlOptions": {
+        "authProtocol": "default",
+        "enableSsl": "Disabled"
+      },
+      "ssh": "Disabled",
+      "previewLimit": 50,
+      "server": "localhost",
+      "port": 3306,
+      "driver": "MySQL",
+      "name": "JRDB",
+      "database": "racing",
+      "username": "root",
+      "password": "dn531016"
+    }
+  ],
+  "editor.folding": false,
+  "editor.glyphMargin": false,
+  "editor.lineDecorationsWidth": 0
+}

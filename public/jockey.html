@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>騎手能力 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #e8eaf0; color: #222; min-height: 100vh; }
+
+    header {
+      background: #1a1a2e; color: #fff;
+      padding: 16px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+
+    /* ── 検索フォーム ────────────────────── */
+    .search-box {
+      background: #fff; border-radius: 10px;
+      padding: 16px 20px; margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      position: relative;
+    }
+    .search-box label { font-size: .82rem; color: #666; white-space: nowrap; }
+    .search-input {
+      width: 100px; min-width: 80px;
+      border: 1px solid #ccc; border-radius: 6px;
+      padding: 7px 12px; font-size: .9rem; font-family: inherit;
+    }
+    .search-input:focus { outline: none; border-color: #4488ff; }
+    #kishu-sel, #year-sel {
+      border: 1px solid #ccc; border-radius: 6px;
+      padding: 7px 10px; font-size: .9rem; font-family: inherit; background: #fff;
+    }
+    #kishu-sel { flex: 1; min-width: 130px; max-width: 220px; }
+    .btn-search {
+      background: #1a1a2e; color: #fff;
+      border: none; border-radius: 6px; padding: 8px 18px;
+      font-size: .9rem; cursor: pointer; font-family: inherit;
+    }
+    .btn-search:hover { background: #2d2d5e; }
+
+    /* ── 能力カード ────────────────────── */
+    .ability-card {
+      background: #fff; border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+      overflow: hidden; display: none;
+    }
+
+    /* カードヘッダー */
+    .card-header {
+      background: #1a1a2e; color: #fff;
+      padding: 12px 20px;
+      display: flex; align-items: center; gap: 18px;
+    }
+    .jockey-num {
+      font-size: 2rem; font-weight: 800; color: #ffd700; line-height: 1; min-width: 44px;
+    }
+    .jockey-name { font-size: 1.25rem; font-weight: 700; }
+    .jockey-sub  { font-size: .78rem; color: #aaa; margin-top: 3px; }
+    .overall-stats {
+      margin-left: auto; display: flex; gap: 18px; font-size: .8rem; color: #ccc;
+      align-items: center; flex-wrap: wrap;
+    }
+    .overall-stats .stat-item { text-align: center; }
+    .overall-stats .sv { font-size: 1.1rem; font-weight: 700; color: #fff; }
+
+    /* カードボディ：左右2列 */
+    .card-body {
+      display: flex; gap: 0;
+    }
+
+    /* ── 左パネル（基本スペック） ── */
+    .spec-panel {
+      width: 280px; min-width: 240px;
+      border-right: 2px solid #e8eae0;
+      padding: 14px 16px;
+      background: #f8f9fa;
+    }
+    .spec-panel h3 {
+      font-size: .72rem; color: #888; letter-spacing: .06em; text-transform: uppercase;
+      margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px solid #ddd;
+    }
+    .spec-row {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .spec-label {
+      width: 48px; font-size: .82rem; color: #444; text-align: right; flex-shrink: 0;
+    }
+    .grade-box {
+      width: 28px; height: 28px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .9rem; font-weight: 800; flex-shrink: 0;
+    }
+    .grade-S { background: #ffd700; color: #1a1a2e; }
+    .grade-A { background: #e02020; color: #fff; }
+    .grade-B { background: #2255cc; color: #fff; }
+    .grade-C { background: #2a8c2a; color: #fff; }
+    .grade-D { background: #888; color: #fff; }
+    .grade-Q { background: #ccc; color: #999; }
+
+    .spec-val { font-size: .78rem; color: #555; width: 34px; text-align: right; flex-shrink: 0; }
+    .spec-bar-wrap { flex: 1; height: 8px; background: #dde; border-radius: 4px; overflow: hidden; }
+    .spec-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+    .fill-S { background: linear-gradient(to right, #ffd700, #ffaa00); }
+    .fill-A { background: linear-gradient(to right, #ff6666, #cc0000); }
+    .fill-B { background: linear-gradient(to right, #6699ff, #2255cc); }
+    .fill-C { background: linear-gradient(to right, #66cc66, #229922); }
+    .fill-D { background: linear-gradient(to right, #aaa, #777); }
+    .fill-Q { background: #ccc; }
+
+    /* ── 右パネル（アビリティ） ── */
+    .ability-panel {
+      flex: 1; padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .ability-panel h3 {
+      font-size: .72rem; color: #888; letter-spacing: .06em; text-transform: uppercase;
+      padding-bottom: 4px; border-bottom: 1px solid #ddd;
+    }
+    .ability-section { display: flex; flex-direction: column; gap: 6px; }
+    .ability-section-title { font-size: .72rem; color: #999; }
+    .ability-row { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .ab {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 9px; border-radius: 5px;
+      font-size: .78rem; font-weight: 700; white-space: nowrap;
+      line-height: 1.3;
+    }
+    /* 得意系 */
+    .ab-green-dark  { background: #1a5c2a; color: #fff; }
+    .ab-green       { background: #28a745; color: #fff; }
+    /* 苦手系 */
+    .ab-red         { background: #721c24; color: #fff; }
+    /* 速度系 */
+    .ab-blue-dark   { background: #003580; color: #fff; }
+    .ab-blue        { background: #2255cc; color: #fff; }
+    /* 末脚系 */
+    .ab-purple-dark { background: #4a0e8f; color: #fff; }
+    .ab-purple      { background: #7b2fbe; color: #fff; }
+    /* 穴系 */
+    .ab-gold        { background: #7d5a00; color: #fff; }
+    .ab-orange      { background: #c46200; color: #fff; }
+    /* 人気馬系 */
+    .ab-teal        { background: #0f6b6b; color: #fff; }
+    /* クラス系 */
+    .ab-gray-dark   { background: #3d3d3d; color: #fff; }
+    .ab-gray        { background: #666; color: #fff; }
+    /* グレード付き */
+    .ab .ab-grade {
+      background: rgba(255,255,255,.25); border-radius: 3px;
+      padding: 1px 5px; font-size: .72rem;
+    }
+
+    .no-ability { font-size: .8rem; color: #bbb; font-style: italic; }
+
+    /* エラー・ロード */
+    .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
+    .error-msg { color: #c0392b; }
+
+    /* 年度タブ */
+    .year-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 2px; }
+    .year-tab {
+      background: #eee; border: none; border-radius: 4px;
+      padding: 4px 10px; font-size: .8rem; cursor: pointer; font-family: inherit;
+    }
+    .year-tab:hover { background: #dde; }
+    .year-tab.active { background: #1a1a2e; color: #fff; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏇 騎手能力</h1>
+  <a class="back-link" href="/">← トップに戻る</a>
+</header>
+
+<main>
+  <!-- 検索フォーム -->
+  <div class="search-box">
+    <label>騎手名</label>
+    <input class="search-input" id="filter-input" type="text"
+           placeholder="絞り込み" autocomplete="off" title="入力して絞り込み">
+    <select id="kishu-sel">
+      <option value="">読み込み中...</option>
+    </select>
+    <label>年度</label>
+    <select id="year-sel">
+      <option value="">最新</option>
+    </select>
+    <button class="btn-search" id="btn-search">表示</button>
+  </div>
+
+  <!-- 能力カード -->
+  <div class="ability-card" id="ability-card">
+    <div class="card-header" id="card-header"></div>
+    <div class="card-body">
+      <div class="spec-panel" id="spec-panel"></div>
+      <div class="ability-panel" id="ability-panel"></div>
+    </div>
+  </div>
+
+  <div class="msg" id="msg" style="display:none"></div>
+</main>
+
+<script>
+// ── 定数 ─────────────────────────────────────
+const COURSE_NAME = {
+  '01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京',
+  '06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'
+};
+const CLASS_NAME = {
+  'A1':'新馬','A3':'未勝利','05':'1勝','10':'2勝','16':'3勝','OP':'OP'
+};
+
+// ── 基本スペック定義 ──────────────────────────
+const SPEC_DEFS = [
+  { label: '芝',     type: 'tds',        values: ['1'],                   minCount: 20 },
+  { label: 'ダート', type: 'tds',        values: ['2'],                   minCount: 20 },
+  { label: '短距離', type: 'distance',   values: ['~1200','1201~1400'],   minCount: 15 },
+  { label: 'マイル', type: 'distance',   values: ['1401~1600'],           minCount: 15 },
+  { label: '中距離', type: 'distance',   values: ['1601~2000'],           minCount: 15 },
+  { label: '長距離', type: 'distance',   values: ['2001~2400','2401~'],   minCount: 10 },
+  { label: '先行力', type: 'ten_rank',   values: ['1'],                   minCount: 10 },
+  { label: '末脚力', type: 'agari_rank', values: ['1'],                   minCount: 10 },
+];
+
+// ── ユーティリティ ────────────────────────────
+function getFactor(factors, type, values) {
+  const rows = factors.filter(f =>
+    f.factor_type === type && values.includes(f.factor_value));
+  if (rows.length === 0) return null;
+  if (rows.length === 1) return rows[0];
+  // 複数バケットを合算
+  const total = rows.reduce((s,r) => s + r.total_count, 0);
+  if (total === 0) return null;
+  const winSum   = rows.reduce((s,r) => s + r.win_payout_sum, 0);
+  const placeSum = rows.reduce((s,r) => s + r.place_payout_sum, 0);
+  const winCnt   = rows.reduce((s,r) => s + r.win_count, 0);
+  const placeCnt = rows.reduce((s,r) => s + r.place_count, 0);
+  return {
+    total_count:    total,
+    win_count:      winCnt,
+    place_count:    placeCnt,
+    win_payout_sum: winSum,
+    place_payout_sum: placeSum,
+    win_rate:    +(winCnt   / total * 100).toFixed(1),
+    place_rate:  +(placeCnt / total * 100).toFixed(1),
+    win_recovery:   +(winSum   / total).toFixed(1),
+    place_recovery: +(placeSum / total).toFixed(1),
+  };
+}
+
+function getGrade(recovery, count, minCount) {
+  if (!recovery || count < minCount) return '?';
+  if (recovery >= 95) return 'S';
+  if (recovery >= 85) return 'A';
+  if (recovery >= 75) return 'B';
+  if (recovery >= 65) return 'C';
+  return 'D';
+}
+
+function barWidth(recovery) {
+  // 50回収=0%, 120回収=100%
+  return Math.max(2, Math.min(100, (recovery - 50) / 70 * 100)).toFixed(1);
+}
+
+function specRowHtml(label, f, minCount) {
+  if (!f || f.total_count < minCount) {
+    return `<div class="spec-row">
+      <span class="spec-label">${label}</span>
+      <span class="grade-box grade-Q">?</span>
+      <span class="spec-val" style="color:#ccc">—</span>
+      <div class="spec-bar-wrap"><div class="spec-bar-fill fill-Q" style="width:2%"></div></div>
+    </div>`;
+  }
+  const g = getGrade(f.place_recovery, f.total_count, minCount);
+  const w = barWidth(f.place_recovery);
+  return `<div class="spec-row">
+    <span class="spec-label">${label}</span>
+    <span class="grade-box grade-${g}">${g}</span>
+    <span class="spec-val">${Math.round(f.place_recovery)}</span>
+    <div class="spec-bar-wrap"><div class="spec-bar-fill fill-${g}" style="width:${w}%"></div></div>
+  </div>`;
+}
+
+// ── アビリティ導出 ────────────────────────────
+function calcAbilities(factors, overall) {
+  const abilities = { strengths: [], weaknesses: [], courses_str: [], courses_weak: [] };
+
+  // 先行力（テン1位）
+  const ten1 = getFactor(factors, 'ten_rank', ['1']);
+  if (ten1 && ten1.total_count >= 10) {
+    if      (ten1.place_recovery >= 95) abilities.strengths.push({ label:'先行', mark:'◎', cls:'ab-blue-dark' });
+    else if (ten1.place_recovery >= 85) abilities.strengths.push({ label:'先行', mark:'○', cls:'ab-blue' });
+  }
+
+  // 末脚力（上がり1位）
+  const agari1 = getFactor(factors, 'agari_rank', ['1']);
+  if (agari1 && agari1.total_count >= 10) {
+    if      (agari1.place_recovery >= 95) abilities.strengths.push({ label:'末脚', mark:'◎', cls:'ab-purple-dark' });
+    else if (agari1.place_recovery >= 85) abilities.strengths.push({ label:'末脚', mark:'○', cls:'ab-purple' });
+  }
+
+  // 人気馬（低オッズ）
+  const pop = getFactor(factors, 'odds', ['~3.0','3.0~5.0']);
+  if (pop && pop.total_count >= 15) {
+    if      (pop.place_recovery >= 95) abilities.strengths.push({ label:'人気馬', mark:'◎', cls:'ab-teal' });
+    else if (pop.place_recovery >= 85) abilities.strengths.push({ label:'人気馬', mark:'○', cls:'ab-teal' });
+  }
+
+  // 穴馬（中穴）
+  const anaMid = getFactor(factors, 'odds', ['10.0~20.0']);
+  if (anaMid && anaMid.total_count >= 8) {
+    if      (anaMid.place_recovery >= 100) abilities.strengths.push({ label:'穴', mark:'◎', cls:'ab-gold' });
+    else if (anaMid.place_recovery >=  90) abilities.strengths.push({ label:'穴', mark:'○', cls:'ab-orange' });
+  }
+
+  // 大穴
+  const anaHigh = getFactor(factors, 'odds', ['20.0~50.0','50.0~']);
+  if (anaHigh && anaHigh.total_count >= 5) {
+    if      (anaHigh.place_recovery >= 100) abilities.strengths.push({ label:'大穴', mark:'◎', cls:'ab-gold' });
+    else if (anaHigh.place_recovery >=  90) abilities.strengths.push({ label:'大穴', mark:'○', cls:'ab-orange' });
+  }
+
+  // 得意・苦手クラス
+  const classCodes = ['A1','A3','05','10','16','OP'];
+  for (const code of classCodes) {
+    const cf = getFactor(factors, 'class', [code]);
+    if (!cf || cf.total_count < 15) continue;
+    const nm = CLASS_NAME[code] || code;
+    if      (cf.place_recovery >= 100) abilities.strengths.push({ label:nm+'クラス', mark:'◎', cls:'ab-gray-dark' });
+    else if (cf.place_recovery >=  90) abilities.strengths.push({ label:nm+'クラス', mark:'○', cls:'ab-gray' });
+    else if (cf.place_recovery <   60) abilities.weaknesses.push({ label:nm+'クラス', mark:'×', cls:'ab-red' });
+  }
+
+  // 得意・苦手競馬場（count>=25）
+  const courseFactors = factors
+    .filter(f => f.factor_type === 'course' && f.total_count >= 25)
+    .sort((a, b) => b.place_recovery - a.place_recovery);
+
+  for (const cf of courseFactors) {
+    const nm = COURSE_NAME[cf.factor_value] || cf.factor_value;
+    if      (cf.place_recovery >= 100) abilities.courses_str.push({ label:nm, mark:'◎', cls:'ab-green-dark' });
+    else if (cf.place_recovery >=  86) abilities.courses_str.push({ label:nm, mark:'○', cls:'ab-green' });
+  }
+  for (const cf of courseFactors) {
+    if (cf.place_recovery < 65) {
+      const nm = COURSE_NAME[cf.factor_value] || cf.factor_value;
+      abilities.courses_weak.push({ label:nm, mark:'×', cls:'ab-red' });
+    }
+  }
+
+  return abilities;
+}
+
+function badgeHtml(list) {
+  if (list.length === 0) return '';
+  return list.map(ab =>
+    `<span class="ab ${ab.cls}">${ab.label}<span class="ab-grade">${ab.mark}</span></span>`
+  ).join('');
+}
+
+// ── レンダリング ──────────────────────────────
+function render(data) {
+  const { kishu_name, kishu_code, agg_year, available_years, overall, factors } = data;
+
+  // ─ ヘッダー ─
+  const ov = overall || {};
+  document.getElementById('card-header').innerHTML = `
+    <div class="jockey-num">${kishu_code || '—'}</div>
+    <div>
+      <div class="jockey-name">${kishu_name}</div>
+      <div class="jockey-sub">
+        <span class="year-tabs">${(available_years || []).map(y =>
+          `<button class="year-tab${y === agg_year ? ' active' : ''}"
+            onclick="loadAbility('${kishu_name}','${y}')">${y}</button>`
+        ).join('')}</span>
+      </div>
+    </div>
+    <div class="overall-stats">
+      <div class="stat-item"><div class="sv">${ov.total_count ?? '—'}</div>出走</div>
+      <div class="stat-item"><div class="sv">${ov.win_rate ?? '—'}%</div>勝率</div>
+      <div class="stat-item"><div class="sv">${ov.place_rate ?? '—'}%</div>複勝率</div>
+      <div class="stat-item"><div class="sv">${ov.win_recovery ?? '—'}</div>単回収</div>
+      <div class="stat-item"><div class="sv">${ov.place_recovery ?? '—'}</div>複回収</div>
+    </div>`;
+
+  // ─ 左パネル（基本スペック）─
+  let specHtml = '<h3>基本スペック <small style="font-weight:normal">（複勝回収率）</small></h3>';
+  for (const def of SPEC_DEFS) {
+    const f = getFactor(factors, def.type, def.values);
+    specHtml += specRowHtml(def.label, f, def.minCount);
+  }
+  document.getElementById('spec-panel').innerHTML = specHtml;
+
+  // ─ 右パネル（特殊アビリティ）─
+  const ab = calcAbilities(factors, overall);
+
+  let abHtml = '<h3>特殊アビリティ</h3>';
+
+  const strBadges = badgeHtml(ab.strengths);
+  const weakBadges = badgeHtml(ab.weaknesses);
+  const cStrBadges = badgeHtml(ab.courses_str);
+  const cWeakBadges = badgeHtml(ab.courses_weak);
+
+  if (!strBadges && !weakBadges && !cStrBadges && !cWeakBadges) {
+    abHtml += '<div class="no-ability">条件を満たすアビリティがありません（データ不足）</div>';
+  } else {
+    if (strBadges) abHtml += `
+      <div class="ability-section">
+        <div class="ability-section-title">強み</div>
+        <div class="ability-row">${strBadges}</div>
+      </div>`;
+    if (cStrBadges) abHtml += `
+      <div class="ability-section">
+        <div class="ability-section-title">得意競馬場</div>
+        <div class="ability-row">${cStrBadges}</div>
+      </div>`;
+    if (weakBadges || cWeakBadges) abHtml += `
+      <div class="ability-section">
+        <div class="ability-section-title">苦手</div>
+        <div class="ability-row">${weakBadges}${cWeakBadges}</div>
+      </div>`;
+  }
+
+  // 得意調教師（top3、10件以上）
+  const topTrainers = factors
+    .filter(f => f.factor_type === 'trainer' && f.total_count >= 10 && f.place_recovery >= 90)
+    .sort((a,b) => b.place_recovery - a.place_recovery)
+    .slice(0, 4);
+  if (topTrainers.length > 0) {
+    const trBadges = topTrainers.map(t => {
+      const mark = t.place_recovery >= 100 ? '◎' : '○';
+      const cls  = t.place_recovery >= 100 ? 'ab-green-dark' : 'ab-green';
+      return `<span class="ab ${cls}">${t.factor_value.trim()}<span class="ab-grade">${mark}</span></span>`;
+    }).join('');
+    abHtml += `<div class="ability-section">
+      <div class="ability-section-title">得意調教師</div>
+      <div class="ability-row">${trBadges}</div>
+    </div>`;
+  }
+
+  // 得意馬主（top3、5件以上）
+  const topOwners = factors
+    .filter(f => f.factor_type === 'umanushi' && f.total_count >= 5 && f.place_recovery >= 95)
+    .sort((a,b) => b.place_recovery - a.place_recovery)
+    .slice(0, 3);
+  if (topOwners.length > 0) {
+    const owBadges = topOwners.map(t => {
+      const mark = t.place_recovery >= 110 ? '◎' : '○';
+      const cls  = t.place_recovery >= 110 ? 'ab-green-dark' : 'ab-green';
+      const name = t.factor_value.trim().slice(0, 10);
+      return `<span class="ab ${cls}">${name}<span class="ab-grade">${mark}</span></span>`;
+    }).join('');
+    abHtml += `<div class="ability-section">
+      <div class="ability-section-title">得意馬主</div>
+      <div class="ability-row">${owBadges}</div>
+    </div>`;
+  }
+
+  document.getElementById('ability-panel').innerHTML = abHtml;
+  document.getElementById('ability-card').style.display = 'block';
+}
+
+// ── データ取得 ────────────────────────────────
+let currentKishu = '';
+
+async function loadAbility(kishuName, year) {
+  currentKishu = kishuName;
+  document.getElementById('ability-card').style.display = 'none';
+  showMsg('読み込み中...');
+  try {
+    const yr = year || document.getElementById('year-sel').value || '';
+    const url = `/api/jockeys/${encodeURIComponent(kishuName)}/ability${yr ? `?year=${yr}` : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'エラー'); }
+    const data = await res.json();
+    hideMsg();
+    render(data);
+    // URL更新
+    const params = new URLSearchParams({ name: kishuName, year: data.agg_year });
+    history.replaceState(null, '', `/jockey.html?${params}`);
+  } catch(e) {
+    showMsg(e.message, true);
+  }
+}
+
+function showMsg(txt, isErr = false) {
+  const el = document.getElementById('msg');
+  el.textContent = txt;
+  el.className = 'msg' + (isErr ? ' error-msg' : '');
+  el.style.display = 'block';
+}
+function hideMsg() { document.getElementById('msg').style.display = 'none'; }
+
+// ── 騎手リスト管理 ───────────────────────────
+let allJockeys = [];
+
+function updateSelect(filterText) {
+  const q = filterText.trim();
+  const filtered = q
+    ? allJockeys.filter(j => j.kishu_name.includes(q))
+    : allJockeys;
+  const sel = document.getElementById('kishu-sel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">騎手を選択してください</option>' +
+    filtered.map(j =>
+      `<option value="${j.kishu_name}"${j.kishu_name === cur ? ' selected' : ''}>${j.kishu_name}</option>`
+    ).join('');
+}
+
+document.getElementById('filter-input').addEventListener('input', e => {
+  updateSelect(e.target.value);
+});
+
+document.getElementById('kishu-sel').addEventListener('change', e => {
+  const name = e.target.value;
+  if (name) loadAbility(name, document.getElementById('year-sel').value);
+});
+
+document.getElementById('btn-search').addEventListener('click', () => {
+  const name = document.getElementById('kishu-sel').value;
+  if (name) loadAbility(name, document.getElementById('year-sel').value);
+});
+
+// ── 初期ロード ────────────────────────────────
+(async () => {
+  const params  = new URLSearchParams(location.search);
+  const nameParam = params.get('name');
+  const yearParam = params.get('year');
+
+  // 年度セレクタ
+  const currentYear = new Date().getFullYear();
+  const yearSel = document.getElementById('year-sel');
+  yearSel.innerHTML = '<option value="">最新</option>';
+  for (let y = currentYear; y >= 2020; y--) {
+    const opt = document.createElement('option');
+    opt.value = String(y);
+    opt.textContent = `${y}年`;
+    if (String(y) === yearParam) opt.selected = true;
+    yearSel.appendChild(opt);
+  }
+
+  // 騎手リスト取得・プルダウン構築
+  try {
+    const res = await fetch('/api/jockeys');
+    allJockeys = await res.json();
+    updateSelect('');
+    // URLパラメータで騎手が指定されていたら選択状態にする
+    if (nameParam) {
+      document.getElementById('kishu-sel').value = nameParam;
+      loadAbility(nameParam, yearParam || '');
+    }
+  } catch(e) {
+    document.getElementById('kishu-sel').innerHTML = '<option value="">読み込みエラー</option>';
+  }
+})();
+</script>
+</body>
+</html>

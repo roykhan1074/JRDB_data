@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>出馬表 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+
+    header {
+      background: #1a1a2e; color: #fff;
+      padding: 16px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 1100px; margin: 16px auto; padding: 0 20px; }
+
+    /* Race info */
+    .race-card {
+      background: #fff; border-radius: 10px; padding: 12px 18px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    }
+    .race-rnum { font-size: 1.6rem; font-weight: 800; color: #1a1a2e; line-height: 1; min-width: 50px; }
+    .race-main { flex: 1; }
+    .race-name { font-size: 1rem; font-weight: 700; margin-bottom: 3px; }
+    .race-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: .78rem; color: #666; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: .7rem; font-weight: 700; }
+    .badge-shiba  { background: #dcfce7; color: #15803d; }
+    .badge-dirt   { background: #ffedd5; color: #c2410c; }
+    .badge-hurdle { background: #ede9fe; color: #6d28d9; }
+    .badge-g1     { background: #fef9c3; color: #b45309; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table, tbody, thead, td, th {
+      font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border-radius: 8px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      white-space: nowrap;
+    }
+    thead tr { background: #1a1a2e; color: #fff; }
+    thead th {
+      padding: 6px 7px; font-size: .72rem; font-weight: 600;
+      text-align: center; letter-spacing: .03em;
+    }
+    thead th.left { text-align: left; }
+    thead .group-sep { border-left: 1px solid #374151; }
+
+    tbody tr { border-bottom: 1px solid #f0f0f0; transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #c7d9f0; }
+    tbody td {
+      padding: 3px 7px; font-size: .83rem;
+      text-align: center; vertical-align: middle; line-height: 1.4;
+    }
+    tbody td.left { text-align: left; }
+    tbody td.group-sep { border-left: 1px solid #f0f0f0; }
+
+    /* 指数値セル */
+    .idx { font-size: .72rem; color: #aaa; }
+
+    /* 調教指数（追切・仕上）*/
+    .training-good { color: #dc2626; font-weight: 600; }
+    .training-bad  { color: #7c3aed; font-weight: 600; }
+    .idx-col  { text-align: center; padding-left: 2px !important; padding-right: 2px !important; width: 34px; }
+    .rank-col { text-align: center; padding-left: 8px !important; padding-right: 8px !important; }
+    .mark-col-w { text-align: center !important; width: 26px; }
+    .mark-col { text-align: center !important; padding-left: 4px !important; padding-right: 0 !important; }
+
+    /* 枠番カラー（日本競馬公式色） */
+    .waku {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 3px;
+      font-size: .75rem; font-weight: 700;
+    }
+    .waku-1 { background: #ffffff; color: #333; border: 1px solid #bbb; }  /* 白 */
+    .waku-2 { background: #1a1a1a; color: #fff; }                          /* 黒 */
+    .waku-3 { background: #e02020; color: #fff; }                          /* 赤 */
+    .waku-4 { background: #1d5fcb; color: #fff; }                          /* 青 */
+    .waku-5 { background: #f5c800; color: #333; }                          /* 黄 */
+    .waku-6 { background: #16a34a; color: #fff; }                          /* 緑 */
+    .waku-7 { background: #f97316; color: #fff; }                          /* オレンジ */
+    .waku-8 { background: #e91e8c; color: #fff; }                          /* ピンク */
+
+    /* 脚質 */
+    .kyaku { font-size: .8rem; color: #555; }
+
+    /* 印 */
+    .mark { font-size: 1rem; font-weight: 700; }
+    .mark-1 { color: #dc2626; }  /* ◎ */
+    .mark-2 { color: #2563eb; }  /* ○ */
+    .mark-3 { color: #d97706; }  /* ▲ */
+    .mark-4 { color: #333; }  /* 注 */
+    .mark-5 { color: #333; }  /* △ */
+    .mark-6 { color: #333; }  /* ▽ */
+    .mark-none { color: #e5e7eb; }
+    .cell-gray { background: #e5e7eb !important; color: #9ca3af !important; }
+    .cell-gray .mark, .cell-gray .idx { color: #9ca3af !important; }
+
+    /* オッズ色 */
+    .odds-1   { font-weight: 700; color: #dc2626; }
+    .odds-2-3 { font-weight: 700; color: #15803d; }
+
+    /* 厩舎指数 */
+    .stable-good { color: #dc2626; font-weight: 600; }
+    .stable-bad  { color: #7c3aed; font-weight: 600; }
+    .stable-yellow { background: #fef08a; }
+
+    .horse-name { font-weight: 600; }
+
+    /* 調教スコア バッジ */
+    .ts-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 22px; height: 20px; border-radius: 4px;
+      font-size: .72rem; font-weight: 800; padding: 0 4px;
+    }
+    .ts-S { background: #dc2626; color: #fff; }
+    .ts-A { background: #2563eb; color: #fff; }
+    .ts-B { background: #d97706; color: #fff; }
+    .ts-C { background: #6b7280; color: #fff; }
+    .ts-D { background: #d1d5db; color: #555; }
+
+    /* 調教スコア数値 */
+    .ts-num { font-size: .7rem; color: #666; margin-left: 3px; }
+
+    /* 重点買い行ハイライト: 中穴(10~49倍) × スコア≥70 */
+    tbody tr.chukiten { background: #f0fdf4 !important; }
+    tbody tr.chukiten:hover { background: #bbf7d0 !important; }
+    tbody tr.chukiten td:first-child {
+      box-shadow: inset 3px 0 0 #16a34a;
+    }
+
+    /* カスタムツールチップ */
+    .ts-wrap { display: inline-flex; align-items: center; gap: 3px; cursor: help; }
+    #ts-tip {
+      position: fixed;
+      background: #1e293b;
+      color: #f1f5f9;
+      padding: 8px 12px;
+      border-radius: 7px;
+      font-size: .73rem;
+      font-family: 'BIZ UDGothic', sans-serif;
+      white-space: pre-line;
+      pointer-events: none;
+      z-index: 9999;
+      max-width: 300px;
+      line-height: 1.75;
+      box-shadow: 0 4px 16px rgba(0,0,0,.45);
+      border: 1px solid #334155;
+      display: none;
+    }
+
+    .loading { text-align: center; padding: 60px; color: #999; }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid #ddd;
+      border-top-color: #3498db; border-radius: 50%;
+      animation: spin .7s linear infinite; margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-msg { background: #fff; border-radius: 8px; padding: 40px; text-align: center; color: #c0392b; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🐎 出馬表</h1>
+  <a class="back-link" href="javascript:history.back()">← 検索結果に戻る</a>
+</header>
+
+<main>
+  <div id="race-card-wrap">
+    <div class="loading"><div class="spinner"></div>読み込み中...</div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap" style="display:none">
+    <table>
+      <thead>
+        <tr>
+          <th>枠</th>
+          <th>馬番</th>
+          <th class="left">馬名</th>
+          <th>B</th>
+          <th>脚質</th>
+          <th class="group-sep">オッズ</th>
+          <th class="group-sep left">騎手</th>
+          <th class="left">厩舎</th>
+          <th class="group-sep" colspan="2">情報印</th>
+          <th class="group-sep" colspan="2">展開印</th>
+          <th class="group-sep" colspan="2">IDM印</th>
+          <th class="group-sep rank-col" style="width:58px">前3F</th>
+          <th class="rank-col" style="width:58px">後3F</th>
+          <th class="group-sep">厩舎指数</th>
+          <th class="group-sep">追切指数</th>
+          <th>仕上指数</th>
+          <th class="group-sep" title="オリジナル調教スコア&#10;S≥80 A≥70 B≥60 C≥40 D<40">調教スコア</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const COURSE_NAME = {
+    '01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京',
+    '06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉',
+  };
+  const TDS_LABEL  = { '1':'芝', '2':'ダ', '3':'障' };
+  const TDS_BADGE  = { '1':'badge-shiba', '2':'badge-dirt', '3':'badge-hurdle' };
+  const GRADE_LABEL = { '1':'G1','2':'G2','3':'G3','A':'L' };
+  const CLASS_LABEL = { 'A1':'新馬','A3':'未勝利','05':'1勝','10':'2勝','16':'3勝','OP':'OP' };
+  const KYAKU_MAP  = { '1':'逃げ', '2':'先行', '3':'差し', '4':'追込' };
+
+  // 順位 → 印記号・CSSクラス
+  const RANK_MARK = {
+    1: { sym: '◎', cls: 'mark-1' },
+    2: { sym: '○', cls: 'mark-2' },
+    3: { sym: '▲', cls: 'mark-3' },
+    4: { sym: '注', cls: 'mark-4' },
+    5: { sym: '△', cls: 'mark-5' },
+    6: { sym: '▽', cls: 'mark-6' },
+  };
+
+  function rankMarkHtml(rank) {
+    const m = RANK_MARK[rank];
+    if (!m) return '<span class="mark mark-none">—</span>';
+    return `<span class="mark ${m.cls}">${m.sym}</span>`;
+  }
+
+  // ──────────────────────────────────────────────────
+  // オリジナル調教スコア計算
+  // 各項目の根拠は analysis report (2020-2023バックテスト) を参照
+  // ──────────────────────────────────────────────────
+  const YAJIRUSHI_LABEL = {'1':'↑↑','2':'↑','3':'→','4':'↓','5':'↓↓'};
+  const HOHBOKU_LABEL   = {'A':'A','B':'B','C':'C','D':'D','E':'E'};
+  const RYO_LABEL       = {'A':'A','B':'B','C':'C','D':'D'};
+
+  function calcTrainingScore(r, raceClass) {
+    let score = 0;
+    const breakdown = [];
+
+    const oi      = parseInt(String(r.oi_index      ?? '').trim()) || 0;
+    const shiage  = parseInt(String(r.shiage_index  ?? '').trim()) || 0;
+    const yaji    = String(r.chokyo_yajirushi ?? '').trim();
+    const saka    = String(r.course_saka      ?? '').trim() === '01';
+    const isshu   = parseInt(String(r.isshuumae_oi_index ?? '').trim()) || 0;
+    const nyukyu  = parseInt(String(r.nyukyu_nichi_mae   ?? '').trim()) || 0;
+    const hohboku = String(r.hohbokusaki_rank  ?? '').trim();
+    const ryo     = String(r.chokyo_ryo_hyoka  ?? '').trim();
+
+    // A. 追切指数 (0~45)
+    let ptOi = 0;
+    if      (oi >= 75) ptOi = 45;
+    else if (oi >= 70) ptOi = 35;
+    else if (oi >= 65) ptOi = 30;
+    else if (oi >= 60) ptOi = 25;
+    else if (oi >= 50) ptOi = 15;
+    if (oi > 0) { score += ptOi; breakdown.push(`追切${oi}:${ptOi>0?'+':''}${ptOi}`); }
+
+    // B. 仕上指数 (0~25)
+    let ptShi = 0;
+    if      (shiage >= 75) ptShi = 25;
+    else if (shiage >= 70) ptShi = 15;
+    else if (shiage >= 65) ptShi = 12;
+    else if (shiage >= 60) ptShi = 10;
+    else if (shiage >= 50) ptShi =  5;
+    if (shiage > 0) { score += ptShi; breakdown.push(`仕上${shiage}:${ptShi>0?'+':''}${ptShi}`); }
+
+    // C. 調教矢印 (-20~+15)
+    let ptYaji = 0;
+    if      (yaji === '1') ptYaji =  15;
+    else if (yaji === '2') ptYaji =   8;
+    else if (yaji === '4') ptYaji = -10;
+    else if (yaji === '5') ptYaji = -20;
+    if (yaji && yaji !== '3') { score += ptYaji; breakdown.push(`矢印${YAJIRUSHI_LABEL[yaji]||yaji}:${ptYaji>=0?'+':''}${ptYaji}`); }
+
+    // D. 坂路×仕上ボーナス (0~7)
+    let ptSaka = 0;
+    if (saka && shiage >= 70) ptSaka = 7;
+    else if (saka && shiage >= 60) ptSaka = 4;
+    else if (saka) ptSaka = 2;
+    if (saka) { score += ptSaka; breakdown.push(`坂路:+${ptSaka}`); }
+
+    // E. 一週前追切指数 (0~5)
+    let ptIsshu = 0;
+    if      (isshu >= 70) ptIsshu = 5;
+    else if (isshu >= 60) ptIsshu = 3;
+    else if (isshu >= 50) ptIsshu = 1;
+    if (isshu > 0) { score += ptIsshu; breakdown.push(`先週${isshu}:+${ptIsshu}`); }
+
+    // F. 入厩何日前 (-3~+5)
+    let ptNyukyu = 0;
+    if      (nyukyu >= 22 && nyukyu <= 28) ptNyukyu =  5;
+    else if (nyukyu >= 15 && nyukyu <= 21) ptNyukyu =  3;
+    else if (nyukyu >= 29 && nyukyu <= 42) ptNyukyu =  2;
+    else if (nyukyu > 42)                  ptNyukyu = -3;
+    if (nyukyu > 0) { score += ptNyukyu; breakdown.push(`入厩${nyukyu}日:${ptNyukyu>=0?'+':''}${ptNyukyu}`); }
+
+    // G. 放牧先ランク (-3~+5)
+    const hohbokuPt = {A:5,B:3,C:1,D:-1,E:-3};
+    const ptHoh = hohbokuPt[hohboku] ?? 0;
+    if (hohboku) { score += ptHoh; breakdown.push(`放牧${hohboku}:${ptHoh>=0?'+':''}${ptHoh}`); }
+
+    // H. 調教量評価 (-5~+3)
+    const ryoPt = {A:3,B:1,C:-2,D:-5};
+    const ptRyo = ryoPt[ryo] ?? 0;
+    if (ryo) { score += ptRyo; breakdown.push(`調教量${ryo}:${ptRyo>=0?'+':''}${ptRyo}`); }
+
+    // I. クラス補正 (Item5: 実データ検証結果に基づく)
+    // 未勝利(A3): score>=70で単回収111 → ペナルティ不要
+    // OP/3勝: 重点買い候補(10-49倍×score>=70)の単回収が低め → 軽微なペナルティ
+    let classNote = '';
+    if (raceClass === 'OP' || raceClass === '16') {
+      score = Math.round(score * 0.95);
+      classNote = (raceClass === 'OP' ? 'OP' : '3勝') + '×0.95';
+    }
+    if (classNote) breakdown.push(classNote);
+
+    const grade = score >= 80 ? 'S' : score >= 70 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D';
+    return { score, grade, tooltip: `調教スコア: ${score}点\n` + breakdown.join(' / ') };
+  }
+
+  /**
+   * 各馬の指数値から密度ランク（同値は同順位）を返す。
+   * ascending=true の場合、値が小さいほど順位が高い（goal_juni用）。
+   */
+  function denseRanks(rows, field, ascending) {
+    const vals = rows.map(r => {
+      const v = parseFloat(String(r[field] ?? '').trim());
+      return isNaN(v) || v === 0 ? null : v;
+    });
+    const unique = [...new Set(vals.filter(v => v !== null))]
+      .sort((a, b) => ascending ? a - b : b - a);
+    return vals.map(v => (v === null ? null : unique.indexOf(v) + 1));
+  }
+
+  function fmtDate(d) {
+    const s = String(d);
+    if (s.length === 8) return `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}`;
+    return s;
+  }
+  function fmtTime(t) {
+    const s = String(t ?? '').trim();
+    if (s.length === 4) return `${parseInt(s.slice(0,2))}:${s.slice(2,4)}`;
+    return s || '—';
+  }
+
+  function getKey() {
+    return new URLSearchParams(location.search).get('key') || '';
+  }
+
+  async function load() {
+    const key = getKey();
+    if (!/^\d{8}$/.test(key)) {
+      document.getElementById('race-card-wrap').innerHTML =
+        '<div class="error-msg">無効なレースキーです</div>';
+      return;
+    }
+    try {
+      const [raceRes, entriesRes] = await Promise.all([
+        fetch(`/api/races/${key}`),
+        fetch(`/api/races/${key}/entries`),
+      ]);
+      if (!raceRes.ok || !entriesRes.ok) throw new Error('データの取得に失敗しました');
+      const race    = await raceRes.json();
+      const entries = await entriesRes.json();
+      renderRaceCard(race);
+      renderTable(entries.rows, race);
+    } catch(e) {
+      document.getElementById('race-card-wrap').innerHTML =
+        `<div class="error-msg">${e.message}</div>`;
+    }
+  }
+
+  function renderRaceCard(race) {
+    const course   = COURSE_NAME[race.course_code] || race.course_code;
+    const rnum     = parseInt(race.race_num);
+    const name     = race.race_name_9char?.trim() || race.race_name?.trim() || `${rnum}R`;
+    const grade    = GRADE_LABEL[race.grade] || '';
+    const cls      = CLASS_LABEL[String(race.class ?? '').trim()] || '';
+    const badgeText = grade || cls;
+    const tds      = TDS_LABEL[race.tds_code] || '';
+    const tdsBadge = TDS_BADGE[race.tds_code] || '';
+    const dist     = race.distance?.trim() ? race.distance.trim() + 'm' : '—';
+    const dir      = race.migihidari === '1' ? '右' : race.migihidari === '2' ? '左' : '';
+    const heads    = race.heads ? parseInt(race.heads) + '頭' : '—';
+    document.title = `${name} ${course}${rnum}R 出馬表 - JRDB`;
+    document.getElementById('race-card-wrap').innerHTML = `
+      <div class="race-card">
+        <div class="race-rnum">${rnum}R</div>
+        <div class="race-main">
+          <div class="race-name">
+            ${name}
+            ${badgeText ? `<span class="badge badge-g1" style="vertical-align:middle">${badgeText}</span>` : ''}
+          </div>
+          <div class="race-meta">
+            <span>📅 ${fmtDate(race.ymd)}</span>
+            <span>🏟 ${course}</span>
+            <span>⏰ ${fmtTime(race.start_time)} 発走</span>
+            <span>${tds ? `<span class="badge ${tdsBadge}">${tds}</span>` : ''} ${dir}${dist}</span>
+            <span>🐎 ${heads}</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderTable(rows, race) {
+    if (!rows || !rows.length) {
+      document.getElementById('table-wrap').style.display = '';
+      document.getElementById('tbody').innerHTML =
+        '<tr><td colspan="16" style="text-align:center;padding:32px;color:#aaa">データがありません</td></tr>';
+      return;
+    }
+
+    // ランク計算
+    const infoRanks  = denseRanks(rows, 'joho_index',    false);  // 高い方が良い
+    const idmRanks   = denseRanks(rows, 'idm',           false);  // 高い方が良い
+    const goalRanks  = denseRanks(rows, 'goal_juni',     true);   // 低い方が良い（goal_juni自体が順位）
+
+    const heads = parseInt(race.heads) || 0;
+
+    // IDM 3位の値を取得（グレー判定用）
+    let idm3rdValue = null;
+    rows.forEach((row, idx) => {
+      if (idmRanks[idx] === 3) {
+        const v = parseFloat(String(row.idm ?? '').trim());
+        if (!isNaN(v)) idm3rdValue = v;
+      }
+    });
+
+    const html = rows.map((r, i) => {
+      // 枠番
+      const waku = parseInt(r.waku_num?.trim() || '0');
+      const wakuHtml = waku >= 1 && waku <= 8
+        ? `<span class="waku waku-${waku}">${waku}</span>` : '—';
+
+      // 脚質
+      const kyaku = KYAKU_MAP[r.kyakushitsu?.trim()] || '—';
+
+      // グレー条件（印より先に計算）
+      const infoRaw    = parseInt(String(r.joho_index ?? '').trim());
+      const infoGray   = infoRaw === -1;
+
+      // 印（情報印は -1 のとき非表示）
+      const infoMark  = infoGray ? '<span class="mark mark-none"></span>' : rankMarkHtml(infoRanks[i]);
+      const idmMark   = rankMarkHtml(idmRanks[i]);
+      const goalMark  = rankMarkHtml(goalRanks[i]);
+
+      // ブリンカー
+      const blinkerHtml = String(r.blinker ?? '').trim() === '1'
+        ? '<span style="font-weight:700;color:#1d4ed8">B</span>' : '';
+
+      // 指数値（別セル用）
+      function idxCell(raw, isInt) {
+        const v = isInt ? parseInt(String(raw ?? '').trim()) : parseFloat(String(raw ?? '').trim());
+        if (isNaN(v)) return '<span class="idx">—</span>';
+        return `<span class="idx">${isInt ? v : (Number.isInteger(v) ? v : v.toFixed(1))}</span>`;
+      }
+      function rankCellBg(raw) {
+        const v = parseInt(String(raw ?? '').trim());
+        if (v === 1)       return ' style="background:#fce7f3"';
+        if (v >= 2 && v <= 3) return ' style="background:#dcfce7"';
+        return '';
+      }
+      function rankNumCell(raw) {
+        const v = parseInt(String(raw ?? '').trim());
+        if (isNaN(v) || v === 0) return '<span class="idx">—</span>';
+        const color = v === 1 ? '#dc2626' : v <= 3 ? '#15803d' : '#333';
+        const style = `style="color:${color};font-weight:${v<=3?v===1?'700':'600':'400'}"`;
+
+        return `<span ${style}>${v}</span>`;
+      }
+      const infoIdxCell = idxCell(r.joho_index, true);
+      const goalIdxCell = idxCell(r.goal_juni,  true);
+      const idmIdxCell  = idxCell(r.idm,        true);
+
+      // グレー条件（goalJuni / idm）
+      const goalJuniRaw = parseInt(String(r.goal_juni ?? '').trim());
+      const goalGray    = !isNaN(goalJuniRaw) && goalJuniRaw > 0 && heads > 0 && goalJuniRaw > heads / 2;
+
+      const idmRaw  = parseFloat(String(r.idm ?? '').trim());
+      const idmGray = idm3rdValue !== null && !isNaN(idmRaw) && idmRaw <= idm3rdValue - 5;
+
+      // 印セル背景色（他列と同様: ◎=ピンク, ○▲=緑）
+      function markRankBg(rank) {
+        if (rank === 1)                return ' style="background:#fce7f3"';
+        if (rank === 2 || rank === 3)  return ' style="background:#dcfce7"';
+        return '';
+      }
+      const infoBg = infoGray ? '' : markRankBg(infoRanks[i]);
+      const goalBg = goalGray ? '' : markRankBg(goalRanks[i]);
+      const idmBg  = idmGray  ? '' : markRankBg(idmRanks[i]);
+
+      // 厩舎指数
+      const stableRaw = String(r.kyusha_index ?? '').trim();
+      const stableV   = parseInt(stableRaw);
+      const stableDisp = isNaN(stableV) ? '—'
+        : `<span class="${stableV >= 10 ? 'stable-good' : stableV < 0 ? 'stable-bad' : ''}">${stableV}</span>`;
+
+      // 基準オッズ（CSVに小数点付きで格納済み → parseFloat）
+      const oddsV    = parseFloat(String(r.kijun_odds ?? '').trim());
+      const oddsRank = parseInt(String(r.kijun_ninki ?? '').trim());
+      let oddsDisp = '—';
+      if (!isNaN(oddsV) && oddsV > 0) {
+        const cls = oddsRank === 1 ? 'odds-1' : (oddsRank === 2 || oddsRank === 3) ? 'odds-2-3' : '';
+        oddsDisp = `<span class="${cls}">${oddsV.toFixed(1)}</span>`;
+      }
+
+      // 厩舎指数セル黄色条件: 基準オッズ≧15 かつ 厩舎指数≧0
+      const stableYellow = !isNaN(oddsV) && oddsV >= 15 && !isNaN(stableV) && stableV >= 0;
+
+      function trainingIdxHtml(raw) {
+        const v = parseInt(String(raw ?? '').trim());
+        if (isNaN(v) || v === 0) return '—';
+        const cls = v >= 60 ? 'training-good' : v < 40 ? 'training-bad' : '';
+        return `<span class="${cls}">${v}</span>`;
+      }
+      const oiDisp     = trainingIdxHtml(r.oi_index);
+      const shiageDisp = trainingIdxHtml(r.shiage_index);
+
+      // 調教スコア計算 (Item1, 2, 4, 5)
+      const raceClass = String(race.class ?? '').trim();
+      const ts = calcTrainingScore(r, raceClass);
+      const tsTip = ts.tooltip.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      const tsBadgeHtml = ts.score === 0 && ts.grade === 'D'
+        ? '<span class="idx">—</span>'
+        : `<span class="ts-wrap" data-tip="${tsTip}">`
+          + `<span class="ts-badge ts-${ts.grade}">${ts.grade}</span>`
+          + `<span class="ts-num">${ts.score}</span>`
+          + `</span>`;
+
+      // 重点買いハイライト: オッズ10〜49倍 × スコア≥70 (Item4)
+      const isChukiten = !isNaN(oddsV) && oddsV >= 10 && oddsV < 50 && ts.score >= 70;
+
+      return `<tr${isChukiten ? ' class="chukiten"' : ''}>
+        <td>${wakuHtml}</td>
+        <td><strong>${parseInt(r.uma_num)}</strong></td>
+        <td class="left horse-name">${r.uma_name?.trim() || '—'}</td>
+        <td>${blinkerHtml}</td>
+        <td><span class="kyaku">${kyaku}</span></td>
+        <td class="group-sep"${oddsRank === 1 ? ' style="background:#fce7f3"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#dcfce7"' : ''}>${oddsDisp}</td>
+        <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
+        <td class="left">${r.trainer_name?.trim() || '—'}</td>
+        <td class="group-sep mark-col${infoGray ? ' cell-gray' : ''}">${infoMark}</td><td class="idx-col${infoGray ? ' cell-gray' : ''}">${infoIdxCell}</td>
+        <td class="group-sep mark-col${goalGray ? ' cell-gray' : ''}">${goalMark}</td><td class="idx-col${goalGray ? ' cell-gray' : ''}">${goalIdxCell}</td>
+        <td class="group-sep mark-col${idmGray ? ' cell-gray' : ''}">${idmMark}</td><td class="idx-col${idmGray ? ' cell-gray' : ''}">${idmIdxCell}</td>
+        <td class="group-sep rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
+        <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
+        <td class="group-sep${stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
+        <td class="group-sep">${oiDisp}</td>
+        <td>${shiageDisp}</td>
+        <td class="group-sep ts-cell">${tsBadgeHtml}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('tbody').innerHTML = html;
+    document.getElementById('table-wrap').style.display = '';
+  }
+
+  load();
+
+  // ── カスタムツールチップ ──────────────────────────────
+  const _tip = document.createElement('div');
+  _tip.id = 'ts-tip';
+  document.body.appendChild(_tip);
+
+  function _showTip(text, x, y) {
+    _tip.textContent = text;
+    _tip.style.display = 'block';
+    _moveTip(x, y);
+  }
+  function _moveTip(x, y) {
+    const w = _tip.offsetWidth, h = _tip.offsetHeight;
+    const left = Math.min(x + 14, window.innerWidth  - w - 8);
+    const top  = Math.max(8,      y - h - 10);
+    _tip.style.left = left + 'px';
+    _tip.style.top  = top  + 'px';
+  }
+  function _hideTip() { _tip.style.display = 'none'; }
+
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-tip]');
+    if (el) _showTip(el.dataset.tip, e.clientX, e.clientY);
+    else _hideTip();
+  });
+  document.addEventListener('mousemove', e => {
+    if (_tip.style.display !== 'none') _moveTip(e.clientX, e.clientY);
+  });
+  document.addEventListener('mouseout', e => {
+    if (!e.relatedTarget || !e.relatedTarget.closest('[data-tip]')) _hideTip();
+  });
+</script>
+</body>
+</html>

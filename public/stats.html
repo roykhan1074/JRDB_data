@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>データ確認 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; }
+
+    header {
+      background: #1a1a2e; color: #fff;
+      padding: 20px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 600; }
+    .back-link {
+      font-size: .85rem; color: #7ec8e3; text-decoration: none;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 960px; margin: 40px auto; padding: 0 24px; }
+
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .section-title { font-size: .8rem; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .08em; }
+    .btn-refresh {
+      padding: 7px 16px; background: #3498db; color: #fff;
+      border: none; border-radius: 6px; font-size: .85rem;
+      cursor: pointer; display: flex; align-items: center; gap: 6px;
+      transition: background .2s;
+    }
+    .btn-refresh:hover { background: #2980b9; }
+    .btn-refresh:disabled { background: #aaa; cursor: not-allowed; }
+
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px; margin-bottom: 28px;
+    }
+    .summary-card {
+      background: #fff; border-radius: 8px; padding: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); text-align: center;
+    }
+    .summary-card .val { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; line-height: 1.2; }
+    .summary-card .lbl { font-size: .75rem; color: #888; margin-top: 4px; }
+
+    table, tbody, thead, td, th {
+      font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border-radius: 8px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    thead tr { background: #1a1a2e; color: #fff; }
+    thead th { padding: 12px 16px; font-size: .8rem; font-weight: 600; text-align: left; letter-spacing: .04em; }
+    tbody tr { border-bottom: 1px solid #f0f0f0; transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #f8fafc; }
+    tbody td { padding: 13px 16px; font-size: .88rem; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 99px; font-size: .72rem; font-weight: 700;
+    }
+    .badge-blue   { background: #dbeafe; color: #1d4ed8; }
+    .badge-green  { background: #dcfce7; color: #15803d; }
+    .badge-purple { background: #ede9fe; color: #6d28d9; }
+    .badge-orange { background: #ffedd5; color: #c2410c; }
+    .badge-red    { background: #fee2e2; color: #b91c1c; }
+    .badge-gray   { background: #f3f4f6; color: #6b7280; }
+
+    .num { font-variant-numeric: tabular-nums; }
+    .date-range { font-size: .8rem; color: #666; }
+
+    .loading { text-align: center; padding: 60px; color: #999; }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid #ddd;
+      border-top-color: #3498db; border-radius: 50%;
+      animation: spin .7s linear infinite; margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .updated-at { font-size: .75rem; color: #aaa; text-align: right; margin-top: 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📊 データ確認</h1>
+  <a class="back-link" href="/">← ポータルに戻る</a>
+</header>
+
+<main>
+  <div class="toolbar">
+    <div class="section-title">テーブル別ロード状況</div>
+    <button class="btn-refresh" id="btn-refresh" onclick="loadStats()">
+      <span id="refresh-icon">🔄</span> 更新
+    </button>
+  </div>
+
+  <div class="summary-grid" id="summary-grid">
+    <div class="loading"><div class="spinner"></div>読み込み中...</div>
+  </div>
+
+  <div id="table-wrap">
+    <table id="stats-table" style="display:none">
+      <thead>
+        <tr>
+          <th>テーブル</th>
+          <th>説明</th>
+          <th style="text-align:right">総行数</th>
+          <th style="text-align:right">ロード日数</th>
+          <th>最古データ</th>
+          <th>最新データ</th>
+        </tr>
+      </thead>
+      <tbody id="stats-body"></tbody>
+    </table>
+  </div>
+
+  <div class="updated-at" id="updated-at"></div>
+</main>
+
+<script>
+  const BADGE_MAP = {
+    BAC: 'badge-blue',
+    KYI: 'badge-green',
+    CYB: 'badge-purple',
+    SED: 'badge-orange',
+    UKC: 'badge-red',
+    SRB: 'badge-gray',
+  };
+
+  function formatDate(d) {
+    if (!d) return '—';
+    // YYYYMMDD → YYYY/MM/DD
+    const s = String(d);
+    if (s.length === 8) return `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}`;
+    return s;
+  }
+
+  function fmtNum(n) {
+    return Number(n).toLocaleString('ja-JP');
+  }
+
+  async function loadStats() {
+    const btn = document.getElementById('btn-refresh');
+    btn.disabled = true;
+    document.getElementById('refresh-icon').textContent = '⏳';
+
+    try {
+      const res = await fetch('/api/stats');
+      const data = await res.json();
+
+      // サマリーカード
+      const totalRows = data.reduce((s, r) => s + r.total, 0);
+      const totalDays = Math.max(...data.map(r => r.days));
+      const latestDate = data.reduce((max, r) => r.maxDate > max ? r.maxDate : max, '');
+
+      document.getElementById('summary-grid').innerHTML = `
+        <div class="summary-card">
+          <div class="val num">${fmtNum(totalRows)}</div>
+          <div class="lbl">総レコード数</div>
+        </div>
+        <div class="summary-card">
+          <div class="val num">${data.length}</div>
+          <div class="lbl">テーブル数</div>
+        </div>
+        <div class="summary-card">
+          <div class="val num">${fmtNum(totalDays)}</div>
+          <div class="lbl">ロード済み日数</div>
+        </div>
+        <div class="summary-card">
+          <div class="val" style="font-size:1.1rem">${formatDate(latestDate)}</div>
+          <div class="lbl">最新データ日付</div>
+        </div>
+      `;
+
+      // テーブル行
+      const tbody = document.getElementById('stats-body');
+      tbody.innerHTML = data.map(r => `
+        <tr>
+          <td><span class="badge ${BADGE_MAP[r.prefix] || 'badge-gray'}">${r.table}</span></td>
+          <td>${r.label}</td>
+          <td class="num" style="text-align:right">${fmtNum(r.total)}</td>
+          <td class="num" style="text-align:right">${fmtNum(r.days)} 日</td>
+          <td class="date-range">${formatDate(r.minDate)}</td>
+          <td class="date-range">${formatDate(r.maxDate)}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('stats-table').style.display = '';
+      document.getElementById('updated-at').textContent =
+        `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+
+    } catch (e) {
+      document.getElementById('summary-grid').innerHTML =
+        `<div style="color:#c0392b">データ取得に失敗しました: ${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      document.getElementById('refresh-icon').textContent = '🔄';
+    }
+  }
+
+  loadStats();
+</script>
+</body>
+</html>

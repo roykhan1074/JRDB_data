@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>レース検索 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+
+    header {
+      background: #1a1a2e; color: #fff;
+      padding: 20px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 600; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 900px; margin: 32px auto; padding: 0 24px; }
+
+    .search-card {
+      background: #fff; border-radius: 10px; padding: 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 24px;
+    }
+    .form-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: .78rem; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .06em; }
+    .form-group input, .form-group select {
+      padding: 8px 12px; border: 1.5px solid #ddd; border-radius: 6px;
+      font-size: .9rem; outline: none; transition: border-color .15s;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: #3498db; }
+    .btn-search {
+      padding: 9px 24px; background: #3498db; color: #fff;
+      border: none; border-radius: 6px; font-size: .9rem; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-search:hover { background: #2980b9; }
+    .btn-search:disabled { background: #aaa; cursor: not-allowed; }
+
+    .section-title { font-size: .78rem; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
+
+    .course-group { margin-bottom: 20px; }
+    .course-label {
+      font-size: .8rem; font-weight: 700; color: #fff;
+      background: #1a1a2e; border-radius: 6px 6px 0 0;
+      padding: 8px 14px;
+    }
+    .race-table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border-radius: 0 0 8px 8px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    .race-table thead tr { background: #f8fafc; }
+    .race-table thead th { padding: 9px 12px; font-size: .75rem; font-weight: 700; color: #888; text-align: left; border-bottom: 1px solid #eee; }
+    .race-table tbody tr { border-bottom: 1px solid #f3f3f3; transition: background .1s; }
+    .race-table tbody tr:last-child { border-bottom: none; }
+    .race-table tbody td { padding: 10px 12px; font-size: .85rem; vertical-align: middle; }
+
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 99px; font-size: .7rem; font-weight: 700; }
+    .badge-shiba   { background: #dcfce7; color: #15803d; }
+    .badge-dirt    { background: #ffedd5; color: #c2410c; }
+    .badge-hurdle  { background: #ede9fe; color: #6d28d9; }
+    .badge-grade1  { background: #fef9c3; color: #b45309; }
+
+    .btn-entries {
+      padding: 5px 14px; border: none; border-radius: 5px;
+      font-size: .78rem; font-weight: 600; cursor: pointer;
+      text-decoration: none; display: inline-block;
+      transition: background .15s;
+    }
+    .btn-entries.has-result { background: #dcfce7; color: #15803d; }
+    .btn-entries.has-result:hover { background: #bbf7d0; }
+    .btn-entries.no-result  { background: #dbeafe; color: #1d4ed8; }
+    .btn-entries.no-result:hover  { background: #bfdbfe; }
+
+    .loading { text-align: center; padding: 40px; color: #999; }
+    .spinner {
+      width: 28px; height: 28px; border: 3px solid #ddd;
+      border-top-color: #3498db; border-radius: 50%;
+      animation: spin .7s linear infinite; margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty-msg { text-align: center; padding: 40px; color: #aaa; font-size: .88rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔍 レース検索</h1>
+  <a class="back-link" href="/">← ポータルに戻る</a>
+</header>
+
+<main>
+  <div class="search-card">
+    <div class="form-row">
+      <div class="form-group">
+        <label>日付</label>
+        <input type="date" id="input-date" />
+      </div>
+      <div class="form-group">
+        <label>競馬場</label>
+        <select id="input-course">
+          <option value="">全場</option>
+          <option value="01">01 札幌</option>
+          <option value="02">02 函館</option>
+          <option value="03">03 福島</option>
+          <option value="04">04 新潟</option>
+          <option value="05">05 東京</option>
+          <option value="06">06 中山</option>
+          <option value="07">07 中京</option>
+          <option value="08">08 京都</option>
+          <option value="09">09 阪神</option>
+          <option value="10">10 小倉</option>
+        </select>
+      </div>
+      <button class="btn-search" id="btn-search" onclick="searchRaces()">🔍 検索</button>
+    </div>
+  </div>
+
+  <div class="section-title" id="list-title" style="display:none">検索結果</div>
+  <div id="race-list">
+    <div class="empty-msg">日付を選択して検索してください</div>
+  </div>
+</main>
+
+<script>
+  const COURSE_NAME = {
+    '01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京',
+    '06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉',
+  };
+  const TDS_LABEL = { '1':'芝','2':'ダ','3':'障' };
+  const TDS_BADGE = { '1':'badge-shiba','2':'badge-dirt','3':'badge-hurdle' };
+  const GRADE_LABEL = { '1':'G1','2':'G2','3':'G3','5':'OP','A':'L' };
+
+  (function() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    document.getElementById('input-date').value =
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  })();
+
+  function fmtTime(t) {
+    if (!t || !t.trim()) return '—';
+    const s = t.trim();
+    if (s.length === 4) return `${parseInt(s.slice(0,2))}:${s.slice(2,4)}`;
+    return s;
+  }
+
+  function raceKey(r) {
+    return r.course_code + r.year_code + r.kai + r.day_code + r.race_num;
+  }
+
+  async function searchRaces() {
+    const isoDate = document.getElementById('input-date').value;
+    const course  = document.getElementById('input-course').value;
+    if (!isoDate) { alert('日付を選択してください'); return; }
+
+    const btn = document.getElementById('btn-search');
+    btn.disabled = true;
+
+    const ymd = isoDate.replace(/-/g, '');
+    const url = `/api/races?date=${ymd}${course ? '&course='+course : ''}`;
+
+    document.getElementById('race-list').innerHTML = '<div class="loading"><div class="spinner"></div>検索中...</div>';
+    document.getElementById('list-title').style.display = '';
+
+    try {
+      const res = await fetch(url);
+      const races = await res.json();
+      renderRaceList(races, isoDate);
+    } catch(e) {
+      document.getElementById('race-list').innerHTML =
+        `<div class="empty-msg" style="color:#c0392b">取得に失敗しました: ${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderRaceList(races, isoDate) {
+    if (!races.length) {
+      document.getElementById('race-list').innerHTML =
+        '<div class="empty-msg">該当するレースがありません</div>';
+      return;
+    }
+
+    const grouped = {};
+    races.forEach(r => {
+      const c = r.course_code;
+      if (!grouped[c]) grouped[c] = [];
+      grouped[c].push(r);
+    });
+
+    const dateDisp = isoDate.replace(/-/g, '/');
+
+    const html = Object.entries(grouped).map(([code, list]) => `
+      <div class="course-group">
+        <div class="course-label">🏟 ${COURSE_NAME[code] || code}　${dateDisp}</div>
+        <table class="race-table">
+          <thead><tr>
+            <th>R</th><th>発走</th><th>レース名</th><th>距離</th><th>頭数</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${list.map(r => {
+              const key = raceKey(r);
+              const tds = TDS_LABEL[r.tds_code] || '';
+              const tdsBadge = TDS_BADGE[r.tds_code] || '';
+              const gradeLabel = GRADE_LABEL[r.grade] || '';
+              const name = r.race_name_9char?.trim() || r.race_name?.trim() || `R${parseInt(r.race_num)}`;
+              const btnClass = 'no-result';
+              const btnLabel = '出馬表を見る';
+              return `<tr>
+                <td><strong>${parseInt(r.race_num)}R</strong></td>
+                <td>${fmtTime(r.start_time)}</td>
+                <td>${name}${gradeLabel ? ` <span class="badge badge-grade1">${gradeLabel}</span>` : ''}</td>
+                <td>${tds ? `<span class="badge ${tdsBadge}">${tds}</span>` : ''} ${r.distance?.trim() ? r.distance.trim()+'m' : '—'}</td>
+                <td>${r.heads ? parseInt(r.heads)+'頭' : '—'}</td>
+                <td><a class="btn-entries ${btnClass}" href="/entries.html?key=${key}">${btnLabel}</a></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `).join('');
+
+    document.getElementById('race-list').innerHTML = html;
+  }
+</script>
+</body>
+</html>

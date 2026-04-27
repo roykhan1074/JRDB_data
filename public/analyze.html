@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JRDB 回収率分析</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; }
+
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .85rem; color: #3498db; text-decoration: none;
+      margin-bottom: 20px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .container { max-width: 960px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 24px; color: #1a1a2e; }
+
+    .card {
+      background: #fff; border-radius: 8px; padding: 20px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1); margin-bottom: 16px;
+    }
+
+    details > summary {
+      font-size: .95rem; font-weight: 700; color: #1a1a2e;
+      cursor: pointer; list-style: none; padding: 4px 0 12px 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    details > summary::before { content: '▼'; font-size: .7rem; color: #888; }
+    details[open] > summary::before { content: '▶'; }
+    details > summary + hr { border: none; border-top: 1px solid #eee; margin-bottom: 16px; }
+
+    /* Conditions 専用レイアウト */
+    .cond-layout { display: flex; flex-direction: column; gap: 12px; }
+    .cond-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px 20px;
+      align-items: center;
+    }
+    .cond-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .cond-label {
+      font-size: .8rem; font-weight: 600; color: #555;
+      white-space: nowrap; min-width: 60px; flex-shrink: 0;
+    }
+    .ymd-input {
+      width: 84px; flex-shrink: 1; padding: 5px 8px;
+      border: 1px solid #ccc; border-radius: 5px; font-size: .85rem;
+    }
+    .cond-select {
+      flex: 1; min-width: 0; padding: 5px 8px;
+      border: 1px solid #ccc; border-radius: 5px;
+      font-size: .85rem; background: #fff;
+    }
+
+    /* Targets 用レイアウト */
+    .targets-cols {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 24px; align-items: start;
+    }
+    .targets-col { display: flex; flex-direction: column; gap: 10px; }
+    .filter-row { display: flex; align-items: center; gap: 6px; }
+    .filter-label {
+      font-size: .8rem; font-weight: 600; color: #555;
+      min-width: 90px; white-space: nowrap;
+    }
+
+    input[type="text"], input[type="date"], select {
+      padding: 5px 8px; border: 1px solid #ccc; border-radius: 5px;
+      font-size: .85rem; background: #fff;
+    }
+    input.short { width: 72px; }
+    select.sel { min-width: 110px; }
+    select.rank-sel { width: 56px; }
+    .sep { color: #aaa; font-size: .8rem; }
+
+    .agg-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    }
+    .agg-item label { display: block; font-size: .8rem; font-weight: 600; color: #555; margin-bottom: 4px; }
+    .agg-item select { width: 100%; }
+
+    .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+    .btn-analyze {
+      flex: 1; padding: 12px; background: #8e44ad; color: #fff;
+      border: none; border-radius: 6px; font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-analyze:hover:not(:disabled) { background: #7d3c98; }
+    .btn-analyze:disabled { background: #aaa; cursor: not-allowed; }
+    .btn-reset {
+      padding: 12px 20px; background: #ecf0f1; color: #555;
+      border: 1px solid #ccc; border-radius: 6px; font-size: .9rem;
+      cursor: pointer;
+    }
+    .btn-reset:hover { background: #dfe6e9; }
+
+    .status-bar {
+      display: none; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 6px; font-size: .85rem; margin-bottom: 8px;
+    }
+    .status-bar.running { background: #fff3cd; color: #856404; display: flex; }
+    .status-bar.done    { background: #d1edff; color: #0a5c9e; display: flex; }
+    .status-bar.error   { background: #fde2e4; color: #842029; display: flex; }
+    .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 結果テーブル */
+    .result-wrap { overflow-x: auto; }
+    table, tbody, thead, td, th { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; }
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th {
+      background: #1a1a2e; color: #fff; padding: 8px 10px;
+      text-align: center; white-space: nowrap; position: sticky; top: 0;
+    }
+    th.agg { background: #2c3e50; }
+    td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #eee; white-space: nowrap; }
+    td.agg { text-align: left; font-weight: 600; background: #f8f9fa; }
+    tr:hover td { background: #eaf4ff; }
+    tr:hover td.agg { background: #d6eaf8; }
+    .rc-100up   { background: #e74c3c !important; color: #fff; font-weight: 700; } /* 100%以上 赤 */
+    .rc-90up    { background: #f5b7b1 !important; }                               /* 90~100% ピンク */
+    .rc-80up    { background: #fef3cd !important; }                               /* 80~90% 黄色 */
+    .rc-60up    { background: #e8daef !important; }                               /* 60~70% 薄い紫 */
+    .rc-below60 { background: #d5d8dc !important; color: #666; }                  /* 60%未満 グレー */
+    .summary-row td { font-weight: 700; background: #ebf5fb; border-top: 2px solid #2980b9; }
+
+    .result-info { font-size: .8rem; color: #888; margin-bottom: 8px; }
+
+    /* オートコンプリート */
+    .ac-wrap { position: relative; flex: 1; min-width: 0; }
+    .ac-input {
+      width: 100%; padding: 5px 8px;
+      border: 1px solid #ccc; border-radius: 5px;
+      font-size: .85rem; background: #fff; font-family: inherit;
+    }
+    .ac-input:focus { outline: none; border-color: #8e44ad; }
+    .ac-list {
+      position: absolute; top: 100%; left: 0; z-index: 200;
+      background: #fff; border: 1px solid #ccc; border-radius: 5px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      min-width: 180px; max-height: 220px; overflow-y: auto;
+      display: none; list-style: none; padding: 0; margin: 0;
+    }
+    .ac-list li {
+      padding: 7px 12px; cursor: pointer; font-size: .85rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .ac-list li:hover { background: #f0f4ff; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="/">← ポータルに戻る</a>
+  <h1>📈 回収率分析</h1>
+
+  <!-- ── Conditions ── -->
+  <div class="card">
+    <details open>
+      <summary>Conditions（絞り込み条件）</summary>
+      <hr>
+      <div class="cond-layout">
+
+        <!-- 行1: 期間 | 競馬場 | 芝/ダート -->
+        <div class="cond-row">
+          <div class="cond-cell">
+            <span class="cond-label">期間</span>
+            <input type="text" class="ymd-input" id="ymd_from">
+            <span class="sep">〜</span>
+            <input type="text" class="ymd-input" id="ymd_to">
+          </div>
+          <div class="cond-cell">
+            <span class="cond-label">競馬場</span>
+            <select class="cond-select" id="course">
+              <option value="00">すべて</option>
+              <option value="01">札幌</option>
+              <option value="02">函館</option>
+              <option value="03">福島</option>
+              <option value="04">新潟</option>
+              <option value="05">東京</option>
+              <option value="06">中山</option>
+              <option value="07">中京</option>
+              <option value="08">京都</option>
+              <option value="09">阪神</option>
+              <option value="10">小倉</option>
+            </select>
+          </div>
+          <div class="cond-cell">
+            <span class="cond-label">芝/ダート</span>
+            <select class="cond-select" id="tds">
+              <option value="00">すべて</option>
+              <option value="1">芝</option>
+              <option value="2">ダート</option>
+              <option value="3">障害</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 行2: 距離 | クラス -->
+        <div class="cond-row">
+          <div class="cond-cell">
+            <span class="cond-label">距離</span>
+            <select class="cond-select" id="distance_from">
+              <option value="">指定なし</option>
+              <option value="1000">1000m</option>
+              <option value="1150">1150m</option>
+              <option value="1200">1200m</option>
+              <option value="1300">1300m</option>
+              <option value="1400">1400m</option>
+              <option value="1500">1500m</option>
+              <option value="1600">1600m</option>
+              <option value="1700">1700m</option>
+              <option value="1800">1800m</option>
+              <option value="1900">1900m</option>
+              <option value="2000">2000m</option>
+              <option value="2100">2100m</option>
+              <option value="2200">2200m</option>
+              <option value="2400">2400m</option>
+              <option value="2500">2500m</option>
+              <option value="2600">2600m</option>
+              <option value="3000">3000m</option>
+              <option value="3200">3200m</option>
+              <option value="3400">3400m</option>
+              <option value="3600">3600m</option>
+            </select>
+            <span class="sep">〜</span>
+            <select class="cond-select" id="distance_to">
+              <option value="">指定なし</option>
+              <option value="1000">1000m</option>
+              <option value="1150">1150m</option>
+              <option value="1200">1200m</option>
+              <option value="1300">1300m</option>
+              <option value="1400">1400m</option>
+              <option value="1500">1500m</option>
+              <option value="1600">1600m</option>
+              <option value="1700">1700m</option>
+              <option value="1800">1800m</option>
+              <option value="1900">1900m</option>
+              <option value="2000">2000m</option>
+              <option value="2100">2100m</option>
+              <option value="2200">2200m</option>
+              <option value="2400">2400m</option>
+              <option value="2500">2500m</option>
+              <option value="2600">2600m</option>
+              <option value="3000">3000m</option>
+              <option value="3200">3200m</option>
+              <option value="3400">3400m</option>
+              <option value="3600">3600m</option>
+            </select>
+          </div>
+          <div class="cond-cell">
+            <span class="cond-label">クラス</span>
+            <select class="cond-select" id="class">
+              <option value="00">すべて</option>
+              <option value="A1">新馬</option>
+              <option value="A3">未勝利</option>
+              <option value="05">1勝クラス</option>
+              <option value="10">2勝クラス</option>
+              <option value="16">3勝クラス</option>
+              <option value="OP">オープン</option>
+            </select>
+          </div>
+          <div class="cond-cell"></div><!-- 3列目の空白スペーサー -->
+        </div>
+
+      </div>
+    </details>
+  </div>
+
+  <!-- ── Targets (human) ── -->
+  <div class="card">
+    <details open>
+      <summary>Targets (human)（人物絞り込み）</summary>
+      <hr>
+      <div class="cond-row">
+        <div class="cond-cell">
+          <span class="cond-label">騎手</span>
+          <div class="ac-wrap">
+            <input type="text" class="ac-input" id="kishu" autocomplete="off">
+            <ul class="ac-list" id="kishu-list"></ul>
+          </div>
+        </div>
+        <div class="cond-cell">
+          <span class="cond-label">調教師</span>
+          <div class="ac-wrap">
+            <input type="text" class="ac-input" id="trainer" autocomplete="off">
+            <ul class="ac-list" id="trainer-list"></ul>
+          </div>
+        </div>
+        <div class="cond-cell">
+          <span class="cond-label">馬主</span>
+          <div class="ac-wrap">
+            <input type="text" class="ac-input" id="umanushi" autocomplete="off">
+            <ul class="ac-list" id="umanushi-list"></ul>
+          </div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- ── Targets ── -->
+  <div class="card">
+    <details open>
+      <summary>Targets（対象馬の絞り込み）</summary>
+      <hr>
+      <div class="targets-cols">
+
+        <!-- 左列 -->
+        <div class="targets-col">
+          <div class="filter-row">
+            <span class="filter-label">基準人気</span>
+            <select class="rank-sel" id="odds_rank_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="odds_rank_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">基準オッズ</span>
+            <input type="text" class="short" id="odds_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="odds_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">枠番</span>
+            <select class="rank-sel" id="wakuban_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="wakuban_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">馬番</span>
+            <select class="rank-sel" id="umaban_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="umaban_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+          </div>
+        </div>
+
+        <!-- 真ん中列 -->
+        <div class="targets-col">
+          <div class="filter-row">
+            <span class="filter-label">情報順位</span>
+            <select class="rank-sel" id="info_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="info_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">展開順位</span>
+            <select class="rank-sel" id="goal_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="goal_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">IDM順位</span>
+            <select class="rank-sel" id="idm_mark_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="idm_mark_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">IDM指数</span>
+            <input type="text" class="short" id="idm_idx_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="idm_idx_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">前3F順位</span>
+            <select class="rank-sel" id="first_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="first_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">後3F順位</span>
+            <select class="rank-sel" id="latter_from"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="latter_to"><option value=""></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option></select>
+          </div>
+        </div>
+
+        <!-- 右列 -->
+        <div class="targets-col">
+          <div class="filter-row">
+            <span class="filter-label">厩舎指数</span>
+            <input type="text" class="short" id="kyusha_idx_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="kyusha_idx_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">追切指数</span>
+            <input type="text" class="short" id="oikiri_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="oikiri_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">仕上指数</span>
+            <input type="text" class="short" id="shiage_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="shiage_to">
+          </div>
+        </div>
+
+      </div>
+    </details>
+  </div>
+
+  <!-- ── Aggregate ── -->
+  <div class="card">
+    <details open>
+      <summary>Aggregate（集計キー）</summary>
+      <hr>
+      <div class="agg-grid">
+        <div class="agg-item">
+          <label>集計キー 1</label>
+          <select id="aggregate_01">
+            <option value="">なし</option>
+            <option value="ymd">日付</option>
+            <option value="course">競馬場</option>
+            <option value="tds">芝/ダート</option>
+            <option value="distance">距離</option>
+            <option value="class">クラス</option>
+            <option value="odds">基準オッズ</option>
+            <option value="odds_rank">基準人気</option>
+            <option value="wakuban">枠番</option>
+            <option value="umaban">馬番</option>
+            <option value="idm_idx">IDM指数帯</option>
+            <option value="idm_mark">IDM印</option>
+            <option value="info">情報印</option>
+            <option value="goal">展開順位</option>
+            <option value="kyusha_idx">厩舎指数帯</option>
+            <option value="first">前3F順位</option>
+            <option value="latter">後3F順位</option>
+            <option value="jockey">騎手</option>
+            <option value="trainer">調教師</option>
+            <option value="kyakushitsu">脚質</option>
+            <option value="oikiri">追切指数帯</option>
+            <option value="shiage">仕上指数帯</option>
+          </select>
+        </div>
+        <div class="agg-item">
+          <label>集計キー 2</label>
+          <select id="aggregate_02">
+            <option value="">なし</option>
+            <option value="ymd">日付</option>
+            <option value="course">競馬場</option>
+            <option value="tds">芝/ダート</option>
+            <option value="distance">距離</option>
+            <option value="class">クラス</option>
+            <option value="odds">基準オッズ</option>
+            <option value="odds_rank">基準人気</option>
+            <option value="wakuban">枠番</option>
+            <option value="umaban">馬番</option>
+            <option value="idm_idx">IDM指数帯</option>
+            <option value="idm_mark">IDM印</option>
+            <option value="info">情報印</option>
+            <option value="goal">展開順位</option>
+            <option value="kyusha_idx">厩舎指数帯</option>
+            <option value="first">前3F順位</option>
+            <option value="latter">後3F順位</option>
+            <option value="jockey">騎手</option>
+            <option value="trainer">調教師</option>
+            <option value="kyakushitsu">脚質</option>
+            <option value="oikiri">追切指数帯</option>
+            <option value="shiage">仕上指数帯</option>
+          </select>
+        </div>
+        <div class="agg-item">
+          <label>集計キー 3</label>
+          <select id="aggregate_03">
+            <option value="">なし</option>
+            <option value="ymd">日付</option>
+            <option value="course">競馬場</option>
+            <option value="tds">芝/ダート</option>
+            <option value="distance">距離</option>
+            <option value="class">クラス</option>
+            <option value="odds">基準オッズ</option>
+            <option value="odds_rank">基準人気</option>
+            <option value="wakuban">枠番</option>
+            <option value="umaban">馬番</option>
+            <option value="idm_idx">IDM指数帯</option>
+            <option value="idm_mark">IDM印</option>
+            <option value="info">情報印</option>
+            <option value="goal">展開順位</option>
+            <option value="kyusha_idx">厩舎指数帯</option>
+            <option value="first">前3F順位</option>
+            <option value="latter">後3F順位</option>
+            <option value="jockey">騎手</option>
+            <option value="trainer">調教師</option>
+            <option value="kyakushitsu">脚質</option>
+            <option value="oikiri">追切指数帯</option>
+            <option value="shiage">仕上指数帯</option>
+          </select>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-analyze" id="btn-analyze">📊 分析実行</button>
+    <button class="btn-reset" id="btn-reset">リセット</button>
+  </div>
+
+  <br>
+
+  <div class="status-bar" id="status-bar">
+    <div class="spinner" id="spinner"></div>
+    <span id="status-text"></span>
+  </div>
+
+  <div id="result-container" style="display:none;">
+    <div class="result-info" id="result-info"></div>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div class="result-wrap">
+        <table id="result-table"></table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function val(id) { return document.getElementById(id).value.trim(); }
+
+  function setStatus(state, text) {
+    const bar = document.getElementById('status-bar');
+    bar.className = 'status-bar ' + state;
+    document.getElementById('status-text').textContent = text;
+    document.getElementById('spinner').style.display = state === 'running' ? '' : 'none';
+  }
+
+  function rateClass(v) {
+    if (v === null || v === '' || v === undefined) return '';
+    const n = parseFloat(v);
+    if (n >= 100) return 'rc-100up';
+    if (n >= 90)  return 'rc-90up';
+    if (n >= 80)  return 'rc-80up';
+    if (n >= 70)  return '';           // 70~80%: 色なし
+    if (n >= 60)  return 'rc-60up';
+    return 'rc-below60';
+  }
+
+  function buildTable(aggLabels, rows) {
+    if (!rows || rows.length === 0) return '<tr><td colspan="20" style="text-align:center;padding:20px;color:#888;">該当データがありません</td></tr>';
+
+    const aggCount = aggLabels.length;
+
+    // ヘッダー
+    let html = '<thead><tr>';
+    aggLabels.forEach(a => { html += `<th class="agg">${a.label}</th>`; });
+    html += '<th>総数</th><th>1着</th><th>2着</th><th>3着</th><th>着外</th>';
+    html += '<th>勝率%</th><th>連対率%</th><th>複勝率%</th><th>単回収率</th><th>複回収率</th>';
+    html += '</tr></thead><tbody>';
+
+    // サマリー集計
+    let sumTotal = 0, sum1 = 0, sum2 = 0, sum3 = 0, sumO = 0;
+    let sumWin = 0, sumPlace = 0;
+
+    rows.forEach(r => {
+      sumTotal += Number(r.total_heads) || 0;
+      sum1  += Number(r.first_number) || 0;
+      sum2  += Number(r.second_number) || 0;
+      sum3  += Number(r.third_number) || 0;
+      sumO  += Number(r.also_ran) || 0;
+      // 加重平均のために総数で戻す
+      sumWin   += (parseFloat(r.win_recovery_rate) || 0) * (Number(r.total_heads) || 0);
+      sumPlace += (parseFloat(r.place_recovery_rate) || 0) * (Number(r.total_heads) || 0);
+    });
+
+    rows.forEach(r => {
+      html += '<tr>';
+      aggLabels.forEach(a => { html += `<td class="agg">${r[a.key] ?? ''}</td>`; });
+      html += `<td>${r.total_heads}</td>`;
+      html += `<td>${r.first_number}</td>`;
+      html += `<td>${r.second_number}</td>`;
+      html += `<td>${r.third_number}</td>`;
+      html += `<td>${r.also_ran}</td>`;
+      html += `<td>${r.first_rate}</td>`;
+      html += `<td>${r.second_rate}</td>`;
+      html += `<td>${r.third_rate}</td>`;
+      const wr = r.win_recovery_rate;
+      const pr = r.place_recovery_rate;
+      html += `<td class="${rateClass(wr)}">${wr !== null && wr !== undefined ? parseFloat(wr).toFixed(1) : ''}</td>`;
+      html += `<td class="${rateClass(pr)}">${pr !== null && pr !== undefined ? parseFloat(pr).toFixed(1) : ''}</td>`;
+      html += '</tr>';
+    });
+
+    // サマリー行
+    if (aggCount > 0 && rows.length > 1) {
+      const totalWinRR   = sumTotal ? (sumWin   / sumTotal).toFixed(1) : '';
+      const totalPlaceRR = sumTotal ? (sumPlace / sumTotal).toFixed(1) : '';
+      const f1r = sumTotal ? (sum1 / sumTotal * 100).toFixed(1) : '';
+      const f2r = sumTotal ? ((sum1 + sum2) / sumTotal * 100).toFixed(1) : '';
+      const f3r = sumTotal ? ((sum1 + sum2 + sum3) / sumTotal * 100).toFixed(1) : '';
+      html += '<tr class="summary-row">';
+      html += `<td class="agg" colspan="${aggCount}">合計</td>`;
+      html += `<td>${sumTotal}</td><td>${sum1}</td><td>${sum2}</td><td>${sum3}</td><td>${sumO}</td>`;
+      html += `<td>${f1r}</td><td>${f2r}</td><td>${f3r}</td>`;
+      html += `<td class="${rateClass(totalWinRR)}">${totalWinRR}</td>`;
+      html += `<td class="${rateClass(totalPlaceRR)}">${totalPlaceRR}</td>`;
+      html += '</tr>';
+    }
+
+    html += '</tbody>';
+    return html;
+  }
+
+  document.getElementById('btn-analyze').addEventListener('click', async () => {
+    const body = {
+      ymd_from: val('ymd_from'), ymd_to: val('ymd_to'),
+      course: val('course'), tds: val('tds'),
+      distance_from: val('distance_from'), distance_to: val('distance_to'),
+      class: val('class'),
+      odds_from: val('odds_from'), odds_to: val('odds_to'),
+      odds_rank_from: val('odds_rank_from'), odds_rank_to: val('odds_rank_to'),
+      wakuban_from: val('wakuban_from'), wakuban_to: val('wakuban_to'),
+      umaban_from: val('umaban_from'), umaban_to: val('umaban_to'),
+      idm_idx_from: val('idm_idx_from'), idm_idx_to: val('idm_idx_to'),
+      idm_mark_from: val('idm_mark_from'), idm_mark_to: val('idm_mark_to'),
+      info_from: val('info_from'), info_to: val('info_to'),
+      goal_from: val('goal_from'), goal_to: val('goal_to'),
+      kyusha_idx_from: val('kyusha_idx_from'), kyusha_idx_to: val('kyusha_idx_to'),
+      first_from: val('first_from'), first_to: val('first_to'),
+      latter_from: val('latter_from'), latter_to: val('latter_to'),
+      oikiri_from: val('oikiri_from'), oikiri_to: val('oikiri_to'),
+      shiage_from: val('shiage_from'), shiage_to: val('shiage_to'),
+      kishu: val('kishu'), trainer: val('trainer'), umanushi: val('umanushi'),
+      aggregate_01: val('aggregate_01'),
+      aggregate_02: val('aggregate_02'),
+      aggregate_03: val('aggregate_03'),
+    };
+
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    setStatus('running', '分析実行中...');
+    document.getElementById('result-container').style.display = 'none';
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        setStatus('error', 'エラー: ' + data.error);
+        return;
+      }
+
+      const { aggLabels, rows } = data;
+      document.getElementById('result-info').textContent = `${rows.length} 件のグループが見つかりました`;
+      document.getElementById('result-table').innerHTML = buildTable(aggLabels, rows);
+      document.getElementById('result-container').style.display = '';
+      setStatus('done', `完了 — ${rows.length} グループ`);
+    } catch (err) {
+      setStatus('error', 'エラー: ' + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── オートコンプリート ─────────────────────────────────────
+  function setupAC(inputId, listId, type) {
+    const input = document.getElementById(inputId);
+    const list  = document.getElementById(listId);
+    let timer;
+
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 1) { list.style.display = 'none'; return; }
+      timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/suggest?type=${type}&q=${encodeURIComponent(q)}`);
+          const names = await res.json();
+          if (!names.length) { list.style.display = 'none'; return; }
+          list.innerHTML = names.map(n => `<li>${n}</li>`).join('');
+          list.style.display = 'block';
+        } catch { list.style.display = 'none'; }
+      }, 200);
+    });
+
+    list.addEventListener('click', e => {
+      const li = e.target.closest('li');
+      if (!li) return;
+      input.value = li.textContent;
+      list.style.display = 'none';
+    });
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') list.style.display = 'none';
+    });
+  }
+
+  setupAC('kishu',    'kishu-list',    'kishu');
+  setupAC('trainer',  'trainer-list',  'trainer');
+  setupAC('umanushi', 'umanushi-list', 'umanushi');
+
+  document.addEventListener('click', e => {
+    ['kishu','trainer','umanushi'].forEach(id => {
+      if (!e.target.closest(`#${id}`) && !e.target.closest(`#${id}-list`)) {
+        document.getElementById(`${id}-list`).style.display = 'none';
+      }
+    });
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    // テキスト入力をクリア
+    ['ymd_from','ymd_to',
+     'odds_from','odds_to',
+     'idm_idx_from','idm_idx_to',
+     'kyusha_idx_from','kyusha_idx_to',
+     'oikiri_from','oikiri_to','shiage_from','shiage_to',
+     'kishu','trainer','umanushi',
+    ].forEach(id => { document.getElementById(id).value = ''; });
+    // セレクトを先頭に戻す
+    ['course','tds','distance_from','distance_to','class',
+     'odds_rank_from','odds_rank_to','wakuban_from','wakuban_to',
+     'umaban_from','umaban_to','info_from','info_to',
+     'idm_mark_from','idm_mark_to',
+     'goal_from','goal_to','first_from','first_to','latter_from','latter_to',
+     'aggregate_01','aggregate_02','aggregate_03']
+      .forEach(id => { document.getElementById(id).selectedIndex = 0; });
+    document.getElementById('result-container').style.display = 'none';
+    document.getElementById('status-bar').className = 'status-bar';
+  });
+</script>
+</body>
+</html>

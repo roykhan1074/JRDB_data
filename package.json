@@ -1,0 +1,30 @@
+{
+  "name": "jrdb-downloader",
+  "version": "1.0.0",
+  "description": "JRDB zip data downloader",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/server.ts",
+    "start": "ts-node src/index.ts",
+    "download:all": "ts-node src/index.ts --from 20200101",
+    "download:today": "ts-node src/index.ts --date today"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "express": "^5.2.1",
+    "iconv-lite": "^0.7.2",
+    "minimist": "^1.2.8",
+    "mysql2": "^3.22.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/express": "^5.0.6",
+    "@types/minimist": "^1.2.5",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

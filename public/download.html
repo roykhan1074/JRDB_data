@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JRDB データ取込</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; }
+
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .85rem; color: #3498db; text-decoration: none;
+      margin-bottom: 20px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .container { max-width: 720px; margin: 40px auto; padding: 0 16px; }
+
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 24px; color: #1a1a2e; }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+      margin-bottom: 16px;
+    }
+
+    .field { margin-bottom: 18px; }
+    label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 6px; color: #555; }
+
+    input[type="date"] {
+      width: 180px; padding: 8px 12px; border: 1px solid #ccc;
+      border-radius: 6px; font-size: .95rem;
+    }
+
+    .date-range {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .date-range span { color: #888; font-size: .9rem; }
+
+    .date-count {
+      font-size: .8rem; color: #3498db; margin-top: 6px;
+    }
+
+    .progress-bar-wrap {
+      background: #e0e0e0; border-radius: 4px; height: 6px;
+      margin-bottom: 8px; display: none;
+    }
+    .progress-bar-fill {
+      background: #3498db; height: 6px; border-radius: 4px;
+      transition: width .3s;
+    }
+
+    .prefix-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    }
+    .prefix-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
+      cursor: pointer; user-select: none; transition: background .15s;
+    }
+    .prefix-item:hover { background: #f5f5f5; }
+    .prefix-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+    .prefix-item.checked { background: #e8f4fd; border-color: #3498db; }
+
+    .prefix-name { font-weight: 700; font-size: .9rem; }
+    .prefix-desc { font-size: .75rem; color: #888; }
+
+    .btn-row {
+      display: flex; gap: 8px;
+    }
+    .btn-run {
+      flex: 1; padding: 12px; background: #3498db; color: #fff;
+      border: none; border-radius: 6px; font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-run:hover:not(:disabled) { background: #2980b9; }
+    .btn-run:disabled { background: #aaa; cursor: not-allowed; }
+
+    .btn-cancel {
+      padding: 12px 20px; background: #e74c3c; color: #fff;
+      border: none; border-radius: 6px; font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: background .2s; display: none;
+    }
+    .btn-cancel:hover { background: #c0392b; }
+    .status-bar.cancelled { background: #fdebd0; color: #784212; display: flex; }
+
+    .log-area {
+      background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
+      padding: 16px; font-family: 'Consolas', monospace; font-size: .82rem;
+      line-height: 1.6; min-height: 200px; max-height: 480px;
+      overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .log-area .ok    { color: #a6e3a1; }
+    .log-area .error { color: #f38ba8; }
+    .log-area .skip  { color: #f9e2af; }
+    .log-area .info  { color: #89dceb; }
+    .log-area .done  { color: #cba6f7; font-weight: bold; }
+
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 6px; font-size: .85rem;
+      margin-bottom: 8px; display: none;
+    }
+    .status-bar.running { background: #fff3cd; color: #856404; display: flex; }
+    .status-bar.done    { background: #d1edff; color: #0a5c9e; display: flex; }
+    .status-bar.error   { background: #fde2e4; color: #842029; display: flex; }
+
+    .spinner {
+      width: 16px; height: 16px; border: 2px solid currentColor;
+      border-top-color: transparent; border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="/">← ポータルに戻る</a>
+  <h1>JRDB データ取込</h1>
+
+  <div class="card">
+    <div class="field">
+      <label>対象期間</label>
+      <div class="date-range">
+        <input type="date" id="date-from">
+        <span>〜</span>
+        <input type="date" id="date-to">
+      </div>
+      <div class="date-count" id="date-count"></div>
+    </div>
+
+    <div class="field">
+      <label>ファイル種別</label>
+      <div class="prefix-grid" id="prefix-grid"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-run" id="btn-run">ダウンロード＆DB取込</button>
+      <button class="btn-cancel" id="btn-cancel">■ キャンセル</button>
+    </div>
+  </div>
+
+  <div class="status-bar" id="status-bar">
+    <div class="spinner" id="spinner"></div>
+    <span id="status-text"></span>
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-bar-wrap">
+    <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div class="log-area" id="log-area">（ログがここに表示されます）</div>
+  </div>
+</div>
+
+<script>
+  const PREFIXES = [
+    { name: 'BAC', desc: 'レース基本情報' },
+    { name: 'KYI', desc: '出馬表' },
+    { name: 'CYB', desc: '調教分析' },
+    { name: 'SED', desc: '成績データ' },
+    { name: 'UKC', desc: '馬マスタ' },
+    { name: 'SRB', desc: '成績速報' },
+  ];
+
+  // 今日の日付をデフォルトにセット
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${yyyy}-${mm}-${dd}`;
+  document.getElementById('date-from').value = todayStr;
+  document.getElementById('date-to').value = todayStr;
+
+  function countDays(from, to) {
+    if (!from || !to || from > to) return 0;
+    const a = new Date(from), b = new Date(to);
+    return Math.round((b - a) / 86400000) + 1;
+  }
+
+  function updateDateCount() {
+    const from = document.getElementById('date-from').value;
+    const to   = document.getElementById('date-to').value;
+    const el   = document.getElementById('date-count');
+    const n    = countDays(from, to);
+    if (!from || !to) { el.textContent = ''; return; }
+    if (from > to) { el.textContent = '開始日付は終了日付以前にしてください'; el.style.color = '#e74c3c'; return; }
+    el.style.color = '#3498db';
+    el.textContent = `${n}日分を処理します`;
+  }
+
+  document.getElementById('date-from').addEventListener('change', updateDateCount);
+  document.getElementById('date-to').addEventListener('change', updateDateCount);
+  updateDateCount();
+
+  // チェックボックス生成
+  const grid = document.getElementById('prefix-grid');
+  PREFIXES.forEach(p => {
+    const item = document.createElement('label');
+    item.className = 'prefix-item';
+    item.innerHTML = `
+      <input type="checkbox" value="${p.name}" checked>
+      <div>
+        <div class="prefix-name">${p.name}</div>
+        <div class="prefix-desc">${p.desc}</div>
+      </div>`;
+    item.querySelector('input').addEventListener('change', function() {
+      item.classList.toggle('checked', this.checked);
+    });
+    item.classList.add('checked');
+    grid.appendChild(item);
+  });
+
+  // ログ出力
+  const logEl = document.getElementById('log-area');
+  function appendLog(msg, cls) {
+    if (logEl.textContent === '（ログがここに表示されます）') logEl.textContent = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function classify(msg) {
+    if (msg.includes('[完了]') || msg.includes('完了')) return 'ok';
+    if (msg.includes('[エラー]') || msg.includes('エラー') || msg.includes('error')) return 'error';
+    if (msg.includes('[スキップ]') || msg.includes('スキップ')) return 'skip';
+    if (msg.includes('[パイプライン完了]')) return 'done';
+    return 'info';
+  }
+
+  function setStatus(state, text) {
+    const bar = document.getElementById('status-bar');
+    const spinner = document.getElementById('spinner');
+    bar.className = 'status-bar ' + state;
+    document.getElementById('status-text').textContent = text;
+    spinner.style.display = state === 'running' ? '' : 'none';
+  }
+
+  let currentAbortController = null;
+
+  document.getElementById('btn-cancel').addEventListener('click', () => {
+    if (currentAbortController) {
+      currentAbortController.abort();
+    }
+  });
+
+  // 実行ボタン
+  document.getElementById('btn-run').addEventListener('click', async () => {
+    const rawFrom = document.getElementById('date-from').value;
+    const rawTo   = document.getElementById('date-to').value;
+    if (!rawFrom || !rawTo) { alert('期間を選択してください'); return; }
+    if (rawFrom > rawTo) { alert('開始日付は終了日付以前にしてください'); return; }
+
+    const dateFrom = rawFrom.replace(/-/g, '');
+    const dateTo   = rawTo.replace(/-/g, '');
+    const totalDays = countDays(rawFrom, rawTo);
+
+    const prefixes = [...document.querySelectorAll('#prefix-grid input:checked')]
+      .map(el => el.value);
+    if (prefixes.length === 0) { alert('ファイル種別を1つ以上選択してください'); return; }
+
+    const btn       = document.getElementById('btn-run');
+    const btnCancel = document.getElementById('btn-cancel');
+    const progressWrap = document.getElementById('progress-bar-wrap');
+    const progressFill = document.getElementById('progress-bar-fill');
+
+    currentAbortController = new AbortController();
+    btn.disabled = true;
+    btnCancel.style.display = '';
+    logEl.textContent = '';
+    progressWrap.style.display = 'block';
+    progressFill.style.width = '0%';
+    const rangeLabel = dateFrom === dateTo ? dateFrom : `${dateFrom}〜${dateTo}`;
+    setStatus('running', `${rangeLabel}（${totalDays}日分）の処理を実行中...`);
+    appendLog(`実行開始: ${rangeLabel}  対象: ${prefixes.join(', ')}`, 'info');
+
+    function finalize() {
+      btn.disabled = false;
+      btnCancel.style.display = 'none';
+      currentAbortController = null;
+    }
+
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateFrom, dateTo, prefixes }),
+        signal: currentAbortController.signal,
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.progress) {
+            const { current, total, date } = payload.progress;
+            progressFill.style.width = `${Math.round(current / total * 100)}%`;
+            setStatus('running', `${date}（${current}/${total}日目）処理中...`);
+          }
+          if (payload.message) appendLog(payload.message, classify(payload.message));
+          if (payload.done) {
+            progressFill.style.width = payload.cancelled ? progressFill.style.width : '100%';
+            if (payload.cancelled) {
+              setStatus('cancelled', 'キャンセルしました');
+              appendLog('[キャンセル] 処理を中断しました', 'skip');
+            } else if (payload.error) {
+              setStatus('error', 'エラーが発生しました');
+              appendLog('エラー: ' + payload.error, 'error');
+            } else {
+              setStatus('done', `${totalDays}日分の処理が完了しました`);
+            }
+            finalize();
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setStatus('cancelled', 'キャンセルしました');
+        appendLog('[キャンセル] 処理を中断しました', 'skip');
+      } else {
+        setStatus('error', 'エラーが発生しました');
+        appendLog('エラー: ' + err.message, 'error');
+      }
+    } finally {
+      finalize();
+    }
+  });
+</script>
+</body>
+</html>

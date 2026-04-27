@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 600; letter-spacing: .02em; }
+    header .subtitle { font-size: .8rem; color: #aaa; margin-top: 2px; }
+
+    main {
+      max-width: 960px;
+      margin: 48px auto;
+      padding: 0 24px;
+    }
+
+    .section-title {
+      font-size: .8rem;
+      font-weight: 700;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 16px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border: 2px solid transparent;
+      transition: border-color .15s, box-shadow .15s, transform .1s;
+      cursor: pointer;
+    }
+    .card:hover {
+      border-color: #3498db;
+      box-shadow: 0 4px 16px rgba(52,152,219,.15);
+      transform: translateY(-2px);
+    }
+
+    .card-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+    }
+    .card-icon.blue   { background: #dbeafe; }
+    .card-icon.green  { background: #dcfce7; }
+    .card-icon.purple { background: #ede9fe; }
+    .card-icon.orange { background: #ffedd5; }
+
+    .card-title { font-size: 1rem; font-weight: 700; }
+    .card-desc  { font-size: .82rem; color: #666; line-height: 1.5; }
+    .card-badge {
+      display: inline-block;
+      font-size: .7rem;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-weight: 600;
+      width: fit-content;
+    }
+    .card-badge.coming {
+      background: #f3f4f6;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🏇 JRDB ポータル</h1>
+    <div class="subtitle">Japan Racing Database 管理画面</div>
+  </div>
+</header>
+
+<main>
+  <div class="section-title">データ管理</div>
+  <div class="card-grid">
+
+    <a class="card" href="/download.html">
+      <div class="card-icon blue">⬇️</div>
+      <div class="card-title">JRDB データ取込</div>
+      <div class="card-desc">JRDBからデータをダウンロードし、変換・DBロードまで一括実行</div>
+      <span class="card-badge">利用可能</span>
+    </a>
+
+    <a class="card" href="/stats.html">
+      <div class="card-icon green">📊</div>
+      <div class="card-title">データ確認</div>
+      <div class="card-desc">ロード済みデータの件数・最終更新日を一覧で確認</div>
+      <span class="card-badge">利用可能</span>
+    </a>
+
+    <a class="card" href="/search.html">
+      <div class="card-icon purple">🔍</div>
+      <div class="card-title">レース検索</div>
+      <div class="card-desc">日付・競馬場でレースを検索し、出馬表・成績を確認</div>
+      <span class="card-badge">利用可能</span>
+    </a>
+
+    <a class="card" href="/analyze.html">
+      <div class="card-icon orange">📈</div>
+      <div class="card-title">回収率分析</div>
+      <div class="card-desc">条件・指数で馬を絞り込み、勝率・単複回収率を集計キーごとに分析</div>
+      <span class="card-badge">利用可能</span>
+    </a>
+
+    <a class="card" href="/jockey.html">
+      <div class="card-icon" style="background:#e8d5ff;font-size:1.5rem">🏇</div>
+      <div class="card-title">騎手能力</div>
+      <div class="card-desc">競馬場・距離・オッズ帯ごとの回収率をPowerProスタイルで可視化</div>
+      <span class="card-badge">利用可能</span>
+    </a>
+
+  </div>
+</main>
+
+</body>
+</html>
