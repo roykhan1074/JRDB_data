@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>コース別傾向 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 980px; margin: 20px auto; padding: 0 16px; }
+
+    /* 検索 */
+    .search-card { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .search-card label { font-size: .82rem; color: #666; white-space: nowrap; }
+    .sel { border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; font-size: .9rem; font-family: inherit; background: #fff; }
+    #sel-venue { min-width: 90px; }
+    #sel-tds   { min-width: 70px; }
+    #sel-dist  { min-width: 80px; }
+    .btn-show { background: #1a1a2e; color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-size: .9rem; cursor: pointer; font-family: inherit; }
+    .btn-show:hover { background: #2d2d5e; }
+
+    /* サマリーカード */
+    .summary-card { background: #1a1a2e; color: #fff; border-radius: 10px; padding: 16px 22px; margin-bottom: 14px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .course-title { font-size: 1.3rem; font-weight: 800; }
+    .course-sub   { font-size: .78rem; color: #aaa; margin-top: 2px; }
+    .stat-items   { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; }
+    .stat-item    { text-align: center; }
+    .stat-item .sv { font-size: 1.05rem; font-weight: 700; }
+    .stat-item .sl { font-size: .72rem; color: #aaa; }
+
+    /* タグ */
+    .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tag { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: .78rem; font-weight: 700; }
+    .tag-pace-front { background: #1d4ed8; color: #fff; }   /* 先行有利 */
+    .tag-pace-close { background: #7c3aed; color: #fff; }   /* 末脚有利 */
+    .tag-nige       { background: #0369a1; color: #fff; }   /* 逃げ天国 */
+    .tag-sashi      { background: #6d28d9; color: #fff; }   /* 差し有効 */
+    .tag-idm        { background: #15803d; color: #fff; }   /* IDM有効 */
+    .tag-joho       { background: #b45309; color: #fff; }   /* 情報印特効 */
+    .tag-kyusha     { background: #be123c; color: #fff; }   /* 厩舎指数有効 */
+
+    /* ペースバー */
+    .pace-section { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .pace-section h3 { font-size: .78rem; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+    .pace-bar-wrap { position: relative; height: 28px; background: linear-gradient(to right, #1d4ed8, #e5e7eb, #7c3aed); border-radius: 14px; }
+    .pace-marker { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 20px; height: 20px; background: #fff; border: 3px solid #1a1a2e; border-radius: 50%; transition: left .5s; }
+    .pace-labels { display: flex; justify-content: space-between; font-size: .72rem; color: #888; margin-top: 5px; }
+
+    /* グリッド */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .panel h3 { font-size: .78rem; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+
+    /* 脚質バー */
+    .kyaku-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .kyaku-name { font-size: .82rem; width: 28px; flex-shrink: 0; font-weight: 700; }
+    .kyaku-bar-wrap { flex: 1; height: 16px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+    .kyaku-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+    .kyaku-vals { font-size: .76rem; color: #555; white-space: nowrap; text-align: right; min-width: 120px; }
+
+    /* 指数ランク */
+    .rank-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .rank-label { font-size: .8rem; width: 36px; flex-shrink: 0; font-weight: 600; }
+    .rank-mini-bar { flex: 1; height: 10px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+    .rank-mini-fill { height: 100%; border-radius: 3px; }
+    .rank-vals { font-size: .74rem; color: #555; white-space: nowrap; min-width: 140px; text-align: right; }
+
+    /* 印テーブル */
+    .mark-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .mark-table th { text-align: center; font-size: .72rem; color: #888; padding: 4px 6px; border-bottom: 1px solid #eee; }
+    .mark-table td { text-align: center; padding: 5px 6px; border-bottom: 1px solid #f5f5f5; }
+    .mark-table tr:last-child td { border-bottom: none; }
+    .mark-sym { font-weight: 700; font-size: .9rem; }
+
+    /* オッズ帯バーチャート */
+    .odds-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .odds-label { font-size: .78rem; color: #555; width: 68px; flex-shrink: 0; font-weight: 600; }
+    .odds-bar-wrap { flex: 1; height: 14px; background: #f0f0f0; border-radius: 3px; overflow: hidden; position: relative; }
+    .odds-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .odds-vals { font-size: .74rem; color: #555; white-space: nowrap; min-width: 150px; text-align: right; }
+    .odds-cnt  { font-size: .68rem; color: #bbb; width: 54px; text-align: right; flex-shrink: 0; }
+    /* 回収率基準ライン */
+    .rr-ref-line { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(0,0,0,.2); }
+
+    /* 厩舎指数バーチャート */
+    .kyusha-score { display: flex; align-items: center; gap: 10px; background: #f8f9fa; border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; }
+    .kyusha-score-stars { font-size: 1.1rem; }
+    .kyusha-score-text  { font-size: .82rem; color: #555; }
+    .kyusha-score-val   { font-size: .95rem; font-weight: 700; margin-left: auto; }
+    .kyusha-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .kyusha-label { font-size: .76rem; width: 60px; flex-shrink: 0; font-weight: 600; }
+    .kyusha-bar-wrap { flex: 1; height: 14px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+    .kyusha-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .kyusha-vals { font-size: .74rem; color: #555; white-space: nowrap; min-width: 150px; text-align: right; }
+    .kyusha-cnt  { font-size: .68rem; color: #bbb; width: 54px; text-align: right; flex-shrink: 0; }
+
+    /* 回収率カラー */
+    .rr-100up { color: #dc2626; font-weight: 700; }
+    .rr-90up  { color: #db2777; }
+    .rr-80up  { color: #d97706; }
+    .rr-low   { color: #6b7280; }
+
+    /* ユーティリティ */
+    .hidden { display: none; }
+    .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
+    .err { color: #dc2626; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>📊 コース別傾向分析</h1>
+  <a class="back-link" href="/">← トップに戻る</a>
+</header>
+
+<main>
+  <div class="search-card">
+    <label>競馬場</label>
+    <select class="sel" id="sel-venue"><option value="">読込中…</option></select>
+    <label>芝/ダ</label>
+    <select class="sel" id="sel-tds">
+      <option value="1">芝</option>
+      <option value="2">ダート</option>
+    </select>
+    <label>距離</label>
+    <select class="sel" id="sel-dist"><option value="">—</option></select>
+    <button class="btn-show" id="btn-show">表示</button>
+  </div>
+
+  <div id="result" class="hidden"></div>
+  <div id="msg" class="msg">競馬場・芝ダ・距離を選択して「表示」を押してください</div>
+</main>
+
+<script>
+// ── 定数 ─────────────────────────────────────
+const VENUE = {'01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京','06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'};
+const TDS   = {'1':'芝','2':'ダート'};
+const KYAKU_NAME = {'1':'逃','2':'先','3':'差','4':'追'};
+const KYAKU_COLOR = {'1':'#1d4ed8','2':'#0891b2','3':'#7c3aed','4':'#db2777'};
+const MARK_SYM = {'1':'◎','2':'○','3':'▲','4':'注','5':'△'};
+const ODDS_ORDER  = ['~2.0','2.0~4.0','4.0~7.0','7.0~15.0','15.0~30.0','30.0~'];
+const KYUSHA_ORDER= ['20+','10~20','0~10','-10~0','-10mi'];
+const KYUSHA_LABEL= {'20+':'20以上','10~20':'10〜20','0~10':'0〜10','-10~0':'−10〜0','-10mi':'−10未満'};
+const KYUSHA_COLOR= {'20+':'#15803d','10~20':'#0891b2','0~10':'#6b7280','-10~0':'#d97706','-10mi':'#dc2626'};
+
+function rrClass(v) {
+  if (!v && v!==0) return '';
+  if (v>=100) return 'rr-100up';
+  if (v>=90)  return 'rr-90up';
+  if (v>=80)  return 'rr-80up';
+  if (v<65)   return 'rr-low';
+  return '';
+}
+function rrSpan(v) {
+  return `<span class="${rrClass(v)}">${v??'—'}</span>`;
+}
+
+// ── コース一覧ロード ────────────────────────
+let allCourses = [];
+
+async function loadCourses() {
+  const res = await fetch('/api/courses');
+  allCourses = await res.json();
+  buildVenueSelect();
+}
+
+function buildVenueSelect() {
+  const venues = [...new Set(allCourses.map(c=>c.course_code))].sort();
+  const sel = document.getElementById('sel-venue');
+  sel.innerHTML = venues.map(c=>`<option value="${c}">${VENUE[c]||c}</option>`).join('');
+  buildDistSelect();
+}
+
+function buildDistSelect() {
+  const venue = document.getElementById('sel-venue').value;
+  const tds   = document.getElementById('sel-tds').value;
+  const dists = allCourses
+    .filter(c=>c.course_code===venue && c.tds_code===tds)
+    .map(c=>c.distance).sort((a,b)=>+a-+b);
+  const sel = document.getElementById('sel-dist');
+  sel.innerHTML = dists.map(d=>`<option value="${d}">${d}m</option>`).join('');
+}
+
+document.getElementById('sel-venue').addEventListener('change', buildDistSelect);
+document.getElementById('sel-tds').addEventListener('change', buildDistSelect);
+
+// ── URLパラメータ反映 ─────────────────────
+function applyUrlParams() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('venue')) document.getElementById('sel-venue').value = p.get('venue');
+  if (p.get('tds'))   document.getElementById('sel-tds').value   = p.get('tds');
+  buildDistSelect();
+  if (p.get('dist')) {
+    document.getElementById('sel-dist').value = p.get('dist');
+    loadAnalysis();
+  }
+}
+
+// ── 分析ロード ────────────────────────────
+async function loadAnalysis() {
+  const venue = document.getElementById('sel-venue').value;
+  const tds   = document.getElementById('sel-tds').value;
+  const dist  = document.getElementById('sel-dist').value;
+  if (!venue||!dist) return;
+
+  document.getElementById('msg').textContent = '読み込み中…';
+  document.getElementById('msg').classList.remove('err','hidden');
+  document.getElementById('result').classList.add('hidden');
+
+  try {
+    const res = await fetch(`/api/course-analysis?course_code=${venue}&tds_code=${tds}&distance=${dist}`);
+    if (!res.ok) { const e=await res.json(); throw new Error(e.error); }
+    const data = await res.json();
+    render(data, venue, tds, dist);
+    history.replaceState(null,'',`/course.html?venue=${venue}&tds=${tds}&dist=${dist}`);
+    document.getElementById('msg').classList.add('hidden');
+    document.getElementById('result').classList.remove('hidden');
+  } catch(e) {
+    document.getElementById('msg').textContent = 'エラー: '+e.message;
+    document.getElementById('msg').classList.add('err');
+  }
+}
+
+document.getElementById('btn-show').addEventListener('click', loadAnalysis);
+document.getElementById('sel-dist').addEventListener('change', loadAnalysis);
+
+// ── レンダリング ─────────────────────────
+function render(data, venue, tds, dist) {
+  const f = data.factors;
+  const base = f.baseline?.[0] ?? {};
+  const kyaku = (f.kyaku||[]).sort((a,b)=>+a.factor_value - +b.factor_value);
+  const tenRank  = (f.ten_rank||[]);
+  const agariRank= (f.agari_rank||[]);
+  const idmMark  = (f.idm_mark||[]).sort((a,b)=>+a.factor_value - +b.factor_value);
+  const johoMark = (f.joho_mark||[]).sort((a,b)=>+a.factor_value - +b.factor_value);
+  const oddsData = (f.odds||[]).sort((a,b)=>ODDS_ORDER.indexOf(a.factor_value)-ODDS_ORDER.indexOf(b.factor_value));
+  const kyusha   = f.kyusha||[];
+
+  const ten1  = tenRank.find(r=>r.factor_value==='1');
+  const agari1= agariRank.find(r=>r.factor_value==='1');
+  const ten1wr  = +(ten1?.win_rate||0);
+  const agari1wr= +(agari1?.win_rate||0);
+
+  // 先行力スコア 0(末脚)〜100(先行)
+  const paceScore = (ten1wr+agari1wr>0) ? ten1wr/(ten1wr+agari1wr)*100 : 50;
+
+  // タグ判定
+  const tags = [];
+  if (paceScore >= 58) tags.push({label:'先行有利', cls:'tag-pace-front'});
+  else if (paceScore <= 42) tags.push({label:'末脚有利', cls:'tag-pace-close'});
+  const nige = kyaku.find(r=>r.factor_value==='1');
+  const sashi= kyaku.find(r=>r.factor_value==='3');
+  if (nige && nige.win_recovery >= 95)  tags.push({label:'逃げ天国', cls:'tag-nige'});
+  if (sashi && sashi.win_recovery >= 88) tags.push({label:'差し有効', cls:'tag-sashi'});
+  const idm1 = idmMark.find(r=>r.factor_value==='1');
+  if (idm1 && idm1.win_recovery >= 85) tags.push({label:'IDM有効', cls:'tag-idm'});
+  const joho1= johoMark.find(r=>r.factor_value==='1');
+  if (joho1 && joho1.win_recovery >= 88) tags.push({label:'情報印特効', cls:'tag-joho'});
+  const kyusha20 = kyusha.find(r=>r.factor_value==='20+');
+  const kyushaLo = kyusha.find(r=>r.factor_value==='-10mi');
+  const kyushaGap = (+(kyusha20?.win_recovery||0)) - (+(kyushaLo?.win_recovery||0));
+  if (kyushaGap >= 15) tags.push({label:'厩舎指数有効', cls:'tag-kyusha'});
+
+  // 脚質バー最大値
+  const maxWR = Math.max(...kyaku.map(r=>+(r.win_rate||0)), 1);
+
+  // ── HTML組み立て ─────────────────────
+  const html = `
+  <!-- サマリー -->
+  <div class="summary-card">
+    <div>
+      <div class="course-title">${VENUE[venue]||venue}　${TDS[tds]||tds}　${dist}m</div>
+      <div class="course-sub">新馬除外・芝ダ対象</div>
+    </div>
+    <div class="stat-items">
+      <div class="stat-item"><div class="sv">${(base.total_count||0).toLocaleString()}</div><div class="sl">出走数</div></div>
+      <div class="stat-item"><div class="sv">${base.win_rate??'—'}%</div><div class="sl">勝率</div></div>
+      <div class="stat-item"><div class="sv">${base.place_rate??'—'}%</div><div class="sl">複勝率</div></div>
+      <div class="stat-item"><div class="sv">${rrSpan(base.win_recovery)}</div><div class="sl">単回収</div></div>
+      <div class="stat-item"><div class="sv">${rrSpan(base.place_recovery)}</div><div class="sl">複回収</div></div>
+    </div>
+  </div>
+
+  <!-- タグ -->
+  ${tags.length ? `<div class="tags">${tags.map(t=>`<span class="tag ${t.cls}">${t.label}</span>`).join('')}</div>` : ''}
+
+  <!-- ペースバー -->
+  <div class="pace-section">
+    <h3>先行力 vs 末脚バランス（テン指数1位勝率 vs 上がり指数1位勝率）</h3>
+    <div class="pace-bar-wrap">
+      <div class="pace-marker" style="left:${paceScore.toFixed(1)}%"></div>
+    </div>
+    <div class="pace-labels">
+      <span>◀ 末脚（テン指数軽視）</span>
+      <span>均衡</span>
+      <span>先行（テン指数重視） ▶</span>
+    </div>
+    <div style="margin-top:8px;font-size:.78rem;color:#555;display:flex;gap:20px;">
+      <span>テン指数1位勝率: <strong>${ten1wr}%</strong>　単回${rrSpan(ten1?.win_recovery)}</span>
+      <span>上がり指数1位勝率: <strong>${agari1wr}%</strong>　単回${rrSpan(agari1?.win_recovery)}</span>
+    </div>
+  </div>
+
+  <!-- 脚質 × テン/上がり -->
+  <div class="grid2">
+    <!-- 脚質別 -->
+    <div class="panel">
+      <h3>脚質別成績</h3>
+      ${kyaku.map(r=>`
+      <div class="kyaku-row">
+        <span class="kyaku-name" style="color:${KYAKU_COLOR[r.factor_value]||'#333'}">${KYAKU_NAME[r.factor_value]||r.factor_value}</span>
+        <div class="kyaku-bar-wrap">
+          <div class="kyaku-bar-fill" style="width:${Math.min(100,+(r.win_rate||0)/maxWR*100).toFixed(1)}%;background:${KYAKU_COLOR[r.factor_value]||'#888'}"></div>
+        </div>
+        <span class="kyaku-vals">${r.win_rate??'—'}% / ${r.total_count}件<br>単${rrSpan(r.win_recovery)} 複${rrSpan(r.place_recovery)}</span>
+      </div>`).join('')}
+    </div>
+
+    <!-- テン/上がり指数順位 -->
+    <div class="panel">
+      <h3>テン指数順位 / 上がり指数順位</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 4px;">
+        <div>
+          <div style="font-size:.72rem;color:#1d4ed8;font-weight:700;margin-bottom:6px;">◀ テン指数順位</div>
+          ${['1','2~3','4~6','7~'].map(v=>{
+            const r=tenRank.find(x=>x.factor_value===v);
+            return `<div class="rank-row">
+              <span class="rank-label" style="color:#1d4ed8">${v}位</span>
+              <div class="rank-mini-bar"><div class="rank-mini-fill" style="width:${Math.min(100,(+(r?.win_rate||0))/25*100).toFixed(1)}%;background:#1d4ed8"></div></div>
+              <span class="rank-vals">${r?.win_rate??'—'}% 単${rrSpan(r?.win_recovery)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:#7c3aed;font-weight:700;margin-bottom:6px;">上がり指数順位 ▶</div>
+          ${['1','2~3','4~6','7~'].map(v=>{
+            const r=agariRank.find(x=>x.factor_value===v);
+            return `<div class="rank-row">
+              <span class="rank-label" style="color:#7c3aed">${v}位</span>
+              <div class="rank-mini-bar"><div class="rank-mini-fill" style="width:${Math.min(100,(+(r?.win_rate||0))/25*100).toFixed(1)}%;background:#7c3aed"></div></div>
+              <span class="rank-vals">${r?.win_rate??'—'}% 単${rrSpan(r?.win_recovery)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDM印 × 情報印 -->
+  <div class="grid2">
+    <div class="panel">
+      <h3>IDM印別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${idmMark.map(r=>`<tr>
+          <td><span class="mark-sym">${MARK_SYM[r.factor_value]||r.factor_value}</span></td>
+          <td>${(r.total_count||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrSpan(r.win_recovery)}</td>
+          <td>${rrSpan(r.place_recovery)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h3>情報印別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${johoMark.map(r=>`<tr>
+          <td><span class="mark-sym">${MARK_SYM[r.factor_value]||r.factor_value}</span></td>
+          <td>${(r.total_count||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrSpan(r.win_recovery)}</td>
+          <td>${rrSpan(r.place_recovery)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- オッズ帯バーチャート -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>基準オッズ帯別成績　<small style="font-weight:normal;color:#aaa">バー長=勝率、回収率は100が損益分岐点</small></h3>
+    ${(()=>{
+      const maxWR = Math.max(...oddsData.map(r=>+(r.win_rate||0)), 1);
+      // 回収率バーの基準: コース全体単回収を0軸とする
+      const baseRR = +(base.win_recovery||70);
+      return oddsData.map(r=>{
+        const wr = +(r.win_rate||0);
+        const wRR= +(r.win_recovery||0);
+        // 勝率バー色: 上位ほど濃い青
+        const barColor = wRR>=100?'#dc2626':wRR>=90?'#db2777':wRR>=80?'#d97706':'#94a3b8';
+        return `<div class="odds-bar-row">
+          <span class="odds-label">${r.factor_value}倍</span>
+          <div class="odds-bar-wrap">
+            <div class="odds-bar-fill" style="width:${Math.min(100,wr/maxWR*100).toFixed(1)}%;background:${barColor}"></div>
+          </div>
+          <span class="odds-vals">${wr}% 勝　単${rrSpan(wRR)} 複${rrSpan(r.place_recovery)}</span>
+          <span class="odds-cnt">${(r.total_count||0).toLocaleString()}件</span>
+        </div>`;
+      }).join('');
+    })()}
+  </div>
+
+  <!-- 厩舎指数バーチャート -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>厩舎指数帯別成績</h3>
+    ${(()=>{
+      const hi = kyusha.find(r=>r.factor_value==='20+');
+      const lo = kyusha.find(r=>r.factor_value==='-10mi');
+      const gap= (+(hi?.win_recovery||0)) - (+(lo?.win_recovery||0));
+      const stars = gap>=25?'★★★':gap>=15?'★★':gap>=8?'★':'☆';
+      const gapText = gap>=25?'非常に強い効果':gap>=15?'効果あり':gap>=8?'やや効果あり':'効果は限定的';
+      const maxWR = Math.max(...KYUSHA_ORDER.map(v=>+(kyusha.find(r=>r.factor_value===v)?.win_rate||0)),1);
+      return `
+      <div class="kyusha-score">
+        <span class="kyusha-score-stars">${stars}</span>
+        <span class="kyusha-score-text">厩舎指数 有効度：${gapText}</span>
+        <span class="kyusha-score-val" style="color:${gap>=15?'#15803d':gap>=8?'#d97706':'#6b7280'}">${gap>=0?'+':''}${gap.toFixed(1)}pt（最高帯−最低帯の単回差）</span>
+      </div>
+      ${KYUSHA_ORDER.map(v=>{
+        const r = kyusha.find(x=>x.factor_value===v);
+        const wr= +(r?.win_rate||0);
+        return `<div class="kyusha-bar-row">
+          <span class="kyusha-label" style="color:${KYUSHA_COLOR[v]}">${KYUSHA_LABEL[v]}</span>
+          <div class="kyusha-bar-wrap">
+            <div class="kyusha-bar-fill" style="width:${Math.min(100,wr/maxWR*100).toFixed(1)}%;background:${KYUSHA_COLOR[v]}"></div>
+          </div>
+          <span class="kyusha-vals">${wr}% 勝　単${rrSpan(r?.win_recovery)} 複${rrSpan(r?.place_recovery)}</span>
+          <span class="kyusha-cnt">${(r?.total_count||0).toLocaleString()}件</span>
+        </div>`;
+      }).join('')}`;
+    })()}
+  </div>
+  `;
+
+  document.getElementById('result').innerHTML = html;
+}
+
+// ── 起動 ────────────────────────────────
+loadCourses().then(() => applyUrlParams());
+</script>
+</body>
+</html>

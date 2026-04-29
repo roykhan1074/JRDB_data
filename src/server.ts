@@ -447,6 +447,64 @@ app.get('/api/suggest', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// コース別傾向API
+// ────────────────────────────────────────────────────────────────────────────
+
+// コース一覧: GET /api/courses
+app.get('/api/courses', async (_req, res) => {
+  const conn = await createConnection();
+  try {
+    const [rows] = await conn.query<any>(
+      `SELECT course_code, tds_code, distance, total_count
+       FROM T_COURSE_FACTOR_AGG
+       WHERE factor_type='baseline' AND total_count >= 100
+       ORDER BY course_code, tds_code, CAST(distance AS UNSIGNED)`
+    );
+    res.json(rows);
+  } finally { await conn.end(); }
+});
+
+// コース分析: GET /api/course-analysis?course_code=05&tds_code=1&distance=1600
+app.get('/api/course-analysis', async (req, res) => {
+  const { course_code, tds_code, distance } = req.query as Record<string, string>;
+  if (!course_code || !tds_code || !distance) {
+    res.status(400).json({ error: 'course_code, tds_code, distance は必須です' });
+    return;
+  }
+  const conn = await createConnection();
+  try {
+    const [rows] = await conn.query<any>(
+      `SELECT factor_type, factor_value, total_count, win_count, place_count,
+              win_rate, place_rate, win_recovery, place_recovery
+       FROM T_COURSE_FACTOR_AGG
+       WHERE course_code=? AND tds_code=? AND distance=?
+       ORDER BY factor_type, factor_value`,
+      [course_code, tds_code, distance.padStart(4, ' ')]
+    );
+    // distance は TRIM済みなのでそのまま試す
+    const data = rows.length ? rows : await (async () => {
+      const [r2] = await conn.query<any>(
+        `SELECT factor_type, factor_value, total_count, win_count, place_count,
+                win_rate, place_rate, win_recovery, place_recovery
+         FROM T_COURSE_FACTOR_AGG
+         WHERE course_code=? AND tds_code=? AND TRIM(distance)=?
+         ORDER BY factor_type, factor_value`,
+        [course_code, tds_code, distance.trim()]
+      );
+      return r2;
+    })();
+    if (!data.length) { res.status(404).json({ error: 'データが見つかりません' }); return; }
+    // factor_type 別に整理
+    const result: Record<string, any[]> = {};
+    for (const row of data) {
+      if (!result[row.factor_type]) result[row.factor_type] = [];
+      result[row.factor_type].push(row);
+    }
+    res.json({ course_code, tds_code, distance: distance.trim(), factors: result });
+  } finally { await conn.end(); }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // 騎手能力API
 // ────────────────────────────────────────────────────────────────────────────
 
