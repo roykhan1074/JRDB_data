@@ -281,6 +281,7 @@ function render(data, venue, tds, dist) {
     <div class="stat-items">
       <div class="stat-item"><div class="sv">${(base.total_count||0).toLocaleString()}</div><div class="sl">出走数</div></div>
       <div class="stat-item"><div class="sv">${base.win_rate??'—'}%</div><div class="sl">勝率</div></div>
+      <div class="stat-item"><div class="sv">${base.renso_rate??'—'}%</div><div class="sl">連対率</div></div>
       <div class="stat-item"><div class="sv">${base.place_rate??'—'}%</div><div class="sl">複勝率</div></div>
       <div class="stat-item"><div class="sv">${rrSpan(base.win_recovery)}</div><div class="sl">単回収</div></div>
       <div class="stat-item"><div class="sv">${rrSpan(base.place_recovery)}</div><div class="sl">複回収</div></div>
@@ -301,140 +302,144 @@ function render(data, venue, tds, dist) {
       <span>均衡</span>
       <span>先行（テン指数重視） ▶</span>
     </div>
-    <div style="margin-top:8px;font-size:.78rem;color:#555;display:flex;gap:20px;">
-      <span>テン指数1位勝率: <strong>${ten1wr}%</strong>　単回${rrSpan(ten1?.win_recovery)}</span>
-      <span>上がり指数1位勝率: <strong>${agari1wr}%</strong>　単回${rrSpan(agari1?.win_recovery)}</span>
+    <div style="margin-top:8px;font-size:.78rem;color:#555;display:flex;gap:20px;flex-wrap:wrap;">
+      <span>テン指数1位: 勝<strong>${ten1wr}%</strong> 連${ten1?.renso_rate??'—'}% 複${ten1?.place_rate??'—'}%</span>
+      <span>上がり指数1位: 勝<strong>${agari1wr}%</strong> 連${agari1?.renso_rate??'—'}% 複${agari1?.place_rate??'—'}%</span>
     </div>
   </div>
 
-  <!-- 脚質 × テン/上がり -->
+  <!-- 脚質 × IDM印 -->
   <div class="grid2">
-    <!-- 脚質別 -->
     <div class="panel">
       <h3>脚質別成績</h3>
-      ${kyaku.map(r=>`
-      <div class="kyaku-row">
-        <span class="kyaku-name" style="color:${KYAKU_COLOR[r.factor_value]||'#333'}">${KYAKU_NAME[r.factor_value]||r.factor_value}</span>
-        <div class="kyaku-bar-wrap">
-          <div class="kyaku-bar-fill" style="width:${Math.min(100,+(r.win_rate||0)/maxWR*100).toFixed(1)}%;background:${KYAKU_COLOR[r.factor_value]||'#888'}"></div>
-        </div>
-        <span class="kyaku-vals">${r.win_rate??'—'}% / ${r.total_count}件<br>単${rrSpan(r.win_recovery)} 複${rrSpan(r.place_recovery)}</span>
-      </div>`).join('')}
+      <table class="mark-table">
+        <thead><tr><th>脚質</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${kyaku.map(r=>`<tr>
+          <td style="font-weight:700;color:${KYAKU_COLOR[r.factor_value]||'#333'}">${KYAKU_NAME[r.factor_value]||r.factor_value}</td>
+          <td>${(r.total_count||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${r.renso_rate??'—'}%</td>
+          <td>${r.place_rate??'—'}%</td>
+          <td>${rrSpan(r.win_recovery)}</td>
+          <td>${rrSpan(r.place_recovery)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
     </div>
-
-    <!-- テン/上がり指数順位 -->
-    <div class="panel">
-      <h3>テン指数順位 / 上がり指数順位</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 4px;">
-        <div>
-          <div style="font-size:.72rem;color:#1d4ed8;font-weight:700;margin-bottom:6px;">◀ テン指数順位</div>
-          ${['1','2~3','4~6','7~'].map(v=>{
-            const r=tenRank.find(x=>x.factor_value===v);
-            return `<div class="rank-row">
-              <span class="rank-label" style="color:#1d4ed8">${v}位</span>
-              <div class="rank-mini-bar"><div class="rank-mini-fill" style="width:${Math.min(100,(+(r?.win_rate||0))/25*100).toFixed(1)}%;background:#1d4ed8"></div></div>
-              <span class="rank-vals">${r?.win_rate??'—'}% 単${rrSpan(r?.win_recovery)}</span>
-            </div>`;
-          }).join('')}
-        </div>
-        <div>
-          <div style="font-size:.72rem;color:#7c3aed;font-weight:700;margin-bottom:6px;">上がり指数順位 ▶</div>
-          ${['1','2~3','4~6','7~'].map(v=>{
-            const r=agariRank.find(x=>x.factor_value===v);
-            return `<div class="rank-row">
-              <span class="rank-label" style="color:#7c3aed">${v}位</span>
-              <div class="rank-mini-bar"><div class="rank-mini-fill" style="width:${Math.min(100,(+(r?.win_rate||0))/25*100).toFixed(1)}%;background:#7c3aed"></div></div>
-              <span class="rank-vals">${r?.win_rate??'—'}% 単${rrSpan(r?.win_recovery)}</span>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- IDM印 × 情報印 -->
-  <div class="grid2">
     <div class="panel">
       <h3>IDM印別成績</h3>
       <table class="mark-table">
-        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
         <tbody>${idmMark.map(r=>`<tr>
           <td><span class="mark-sym">${MARK_SYM[r.factor_value]||r.factor_value}</span></td>
           <td>${(r.total_count||0).toLocaleString()}</td>
           <td>${r.win_rate??'—'}%</td>
+          <td>${r.renso_rate??'—'}%</td>
+          <td>${r.place_rate??'—'}%</td>
+          <td>${rrSpan(r.win_recovery)}</td>
+          <td>${rrSpan(r.place_recovery)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- テン指数 × 上がり指数（並列） -->
+  <div class="grid2">
+    <div class="panel">
+      <h3>テン指数順位別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>順位</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${['1','2~3','4~6','7~9','10~12','13~'].map(v=>{
+          const r=tenRank.find(x=>x.factor_value===v);
+          return `<tr>
+            <td style="font-weight:700;color:#1d4ed8">${v}位</td>
+            <td>${(r?.total_count||0).toLocaleString()}</td>
+            <td>${r?.win_rate??'—'}%</td>
+            <td>${r?.renso_rate??'—'}%</td>
+            <td>${r?.place_rate??'—'}%</td>
+            <td>${rrSpan(r?.win_recovery)}</td>
+            <td>${rrSpan(r?.place_recovery)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h3>上がり指数順位別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>順位</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${['1','2~3','4~6','7~9','10~12','13~'].map(v=>{
+          const r=agariRank.find(x=>x.factor_value===v);
+          return `<tr>
+            <td style="font-weight:700;color:#7c3aed">${v}位</td>
+            <td>${(r?.total_count||0).toLocaleString()}</td>
+            <td>${r?.win_rate??'—'}%</td>
+            <td>${r?.renso_rate??'—'}%</td>
+            <td>${r?.place_rate??'—'}%</td>
+            <td>${rrSpan(r?.win_recovery)}</td>
+            <td>${rrSpan(r?.place_recovery)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 情報印 -->
+  <div class="grid2">
+    <div class="panel">
+      <h3>情報印別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${johoMark.map(r=>`<tr>
+          <td><span class="mark-sym">${MARK_SYM[r.factor_value]||r.factor_value}</span></td>
+          <td>${(r.total_count||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${r.renso_rate??'—'}%</td>
+          <td>${r.place_rate??'—'}%</td>
+          <td>${rrSpan(r.win_recovery)}</td>
+          <td>${rrSpan(r.place_recovery)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="panel" style="background:transparent;box-shadow:none;"></div>
+  </div>
+
+  <!-- オッズ帯 × 厩舎指数 -->
+  <div class="grid2">
+    <div class="panel">
+      <h3>基準オッズ帯別成績</h3>
+      <table class="mark-table">
+        <thead><tr><th>オッズ</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${oddsData.map(r=>`<tr>
+          <td style="font-weight:600">${r.factor_value}倍</td>
+          <td>${(r.total_count||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${r.renso_rate??'—'}%</td>
+          <td>${r.place_rate??'—'}%</td>
           <td>${rrSpan(r.win_recovery)}</td>
           <td>${rrSpan(r.place_recovery)}</td>
         </tr>`).join('')}</tbody>
       </table>
     </div>
     <div class="panel">
-      <h3>情報印別成績</h3>
-      <table class="mark-table">
-        <thead><tr><th>印</th><th>件数</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
-        <tbody>${johoMark.map(r=>`<tr>
-          <td><span class="mark-sym">${MARK_SYM[r.factor_value]||r.factor_value}</span></td>
-          <td>${(r.total_count||0).toLocaleString()}</td>
-          <td>${r.win_rate??'—'}%</td>
-          <td>${rrSpan(r.win_recovery)}</td>
-          <td>${rrSpan(r.place_recovery)}</td>
-        </tr>`).join('')}</tbody>
-      </table>
+      <h3>厩舎指数帯別成績</h3>
+      ${(()=>{
+        return `
+        <table class="mark-table">
+          <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+          <tbody>${KYUSHA_ORDER.map(v=>{
+            const r=kyusha.find(x=>x.factor_value===v);
+            return `<tr>
+              <td style="font-weight:600;color:${KYUSHA_COLOR[v]}">${KYUSHA_LABEL[v]}</td>
+              <td>${(r?.total_count||0).toLocaleString()}</td>
+              <td>${r?.win_rate??'—'}%</td>
+              <td>${r?.renso_rate??'—'}%</td>
+              <td>${r?.place_rate??'—'}%</td>
+              <td>${rrSpan(r?.win_recovery)}</td>
+              <td>${rrSpan(r?.place_recovery)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+      })()}
     </div>
-  </div>
-
-  <!-- オッズ帯バーチャート -->
-  <div class="panel" style="margin-bottom:14px">
-    <h3>基準オッズ帯別成績　<small style="font-weight:normal;color:#aaa">バー長=勝率、回収率は100が損益分岐点</small></h3>
-    ${(()=>{
-      const maxWR = Math.max(...oddsData.map(r=>+(r.win_rate||0)), 1);
-      // 回収率バーの基準: コース全体単回収を0軸とする
-      const baseRR = +(base.win_recovery||70);
-      return oddsData.map(r=>{
-        const wr = +(r.win_rate||0);
-        const wRR= +(r.win_recovery||0);
-        // 勝率バー色: 上位ほど濃い青
-        const barColor = wRR>=100?'#dc2626':wRR>=90?'#db2777':wRR>=80?'#d97706':'#94a3b8';
-        return `<div class="odds-bar-row">
-          <span class="odds-label">${r.factor_value}倍</span>
-          <div class="odds-bar-wrap">
-            <div class="odds-bar-fill" style="width:${Math.min(100,wr/maxWR*100).toFixed(1)}%;background:${barColor}"></div>
-          </div>
-          <span class="odds-vals">${wr}% 勝　単${rrSpan(wRR)} 複${rrSpan(r.place_recovery)}</span>
-          <span class="odds-cnt">${(r.total_count||0).toLocaleString()}件</span>
-        </div>`;
-      }).join('');
-    })()}
-  </div>
-
-  <!-- 厩舎指数バーチャート -->
-  <div class="panel" style="margin-bottom:14px">
-    <h3>厩舎指数帯別成績</h3>
-    ${(()=>{
-      const hi = kyusha.find(r=>r.factor_value==='20+');
-      const lo = kyusha.find(r=>r.factor_value==='-10mi');
-      const gap= (+(hi?.win_recovery||0)) - (+(lo?.win_recovery||0));
-      const stars = gap>=25?'★★★':gap>=15?'★★':gap>=8?'★':'☆';
-      const gapText = gap>=25?'非常に強い効果':gap>=15?'効果あり':gap>=8?'やや効果あり':'効果は限定的';
-      const maxWR = Math.max(...KYUSHA_ORDER.map(v=>+(kyusha.find(r=>r.factor_value===v)?.win_rate||0)),1);
-      return `
-      <div class="kyusha-score">
-        <span class="kyusha-score-stars">${stars}</span>
-        <span class="kyusha-score-text">厩舎指数 有効度：${gapText}</span>
-        <span class="kyusha-score-val" style="color:${gap>=15?'#15803d':gap>=8?'#d97706':'#6b7280'}">${gap>=0?'+':''}${gap.toFixed(1)}pt（最高帯−最低帯の単回差）</span>
-      </div>
-      ${KYUSHA_ORDER.map(v=>{
-        const r = kyusha.find(x=>x.factor_value===v);
-        const wr= +(r?.win_rate||0);
-        return `<div class="kyusha-bar-row">
-          <span class="kyusha-label" style="color:${KYUSHA_COLOR[v]}">${KYUSHA_LABEL[v]}</span>
-          <div class="kyusha-bar-wrap">
-            <div class="kyusha-bar-fill" style="width:${Math.min(100,wr/maxWR*100).toFixed(1)}%;background:${KYUSHA_COLOR[v]}"></div>
-          </div>
-          <span class="kyusha-vals">${wr}% 勝　単${rrSpan(r?.win_recovery)} 複${rrSpan(r?.place_recovery)}</span>
-          <span class="kyusha-cnt">${(r?.total_count||0).toLocaleString()}件</span>
-        </div>`;
-      }).join('')}`;
-    })()}
   </div>
   `;
 

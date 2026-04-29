@@ -474,8 +474,8 @@ app.get('/api/course-analysis', async (req, res) => {
   const conn = await createConnection();
   try {
     const [rows] = await conn.query<any>(
-      `SELECT factor_type, factor_value, total_count, win_count, place_count,
-              win_rate, place_rate, win_recovery, place_recovery
+      `SELECT factor_type, factor_value, total_count, win_count, renso_count, place_count,
+              win_rate, renso_rate, place_rate, win_recovery, place_recovery
        FROM T_COURSE_FACTOR_AGG
        WHERE course_code=? AND tds_code=? AND distance=?
        ORDER BY factor_type, factor_value`,
