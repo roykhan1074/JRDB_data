@@ -114,6 +114,11 @@
     /* 厩舎指数 */
     .stable-good { color: #dc2626; font-weight: 600; }
     .stable-bad  { color: #7c3aed; font-weight: 600; }
+    /* コンビ回収率 */
+    .combo-s   { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 4px; }
+    .combo-a   { background:#fde68a; color:#92400e; font-weight:700; border-radius:3px; padding:1px 4px; }
+    .combo-b   { background:#d1fae5; color:#065f46; border-radius:3px; padding:1px 4px; }
+    .combo-n   { color:#9ca3af; font-size:.72rem; }
     .stable-yellow { background: #fef08a; }
 
     .horse-name { font-weight: 600; }
@@ -194,6 +199,7 @@
           <th class="group-sep">オッズ</th>
           <th class="group-sep left">騎手</th>
           <th class="left">厩舎</th>
+          <th class="group-sep" title="騎手×調教師コンビの単勝回収率">コンビ</th>
           <th class="group-sep" colspan="2">情報印</th>
           <th class="group-sep" colspan="2">展開印</th>
           <th class="group-sep" colspan="2">IDM印</th>
@@ -551,6 +557,13 @@
         <td class="group-sep"${oddsRank === 1 ? ' style="background:#fce7f3"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#dcfce7"' : ''}>${oddsDisp}</td>
         <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
         <td class="left">${r.trainer_name?.trim() || '—'}</td>
+        <td class="group-sep">${(()=>{
+          const rr = r.combo_win_rr;
+          const n  = r.combo_n;
+          if (!rr && rr!==0) return '<span class="combo-n">—</span>';
+          const cls = rr>=100?'combo-s':rr>=85?'combo-a':rr>=75?'combo-b':'combo-n';
+          return `<span class="${cls}">${rr}</span><span class="combo-n" style="display:block;font-size:.65rem">n=${n}</span>`;
+        })()}</td>
         <td class="group-sep mark-col${infoGray ? ' cell-gray' : ''}">${infoMark}</td><td class="idx-col${infoGray ? ' cell-gray' : ''}">${infoIdxCell}</td>
         <td class="group-sep mark-col${goalGray ? ' cell-gray' : ''}">${goalMark}</td><td class="idx-col${goalGray ? ' cell-gray' : ''}">${goalIdxCell}</td>
         <td class="group-sep mark-col${idmGray ? ' cell-gray' : ''}">${idmMark}</td><td class="idx-col${idmGray ? ' cell-gray' : ''}">${idmIdxCell}</td>

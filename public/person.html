@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>人物分析 - JRDB ポータル</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #e8eaf0; color: #222; min-height: 100vh; }
+    header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    main { max-width: 980px; margin: 20px auto; padding: 0 16px; }
+
+    /* 検索 */
+    .search-card { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .type-toggle { display: flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+    .type-btn { padding: 7px 16px; font-size: .88rem; cursor: pointer; border: none; font-family: inherit; background: #fff; color: #666; }
+    .type-btn.active { background: #1a1a2e; color: #fff; font-weight: 600; }
+    .search-input { width: 100px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 12px; font-size: .9rem; font-family: inherit; }
+    .search-input:focus { outline: none; border-color: #4488ff; }
+    #person-sel { flex: 1; min-width: 130px; max-width: 220px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; font-size: .9rem; font-family: inherit; background: #fff; }
+    .btn-show { background: #1a1a2e; color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-size: .9rem; cursor: pointer; font-family: inherit; }
+    .btn-show:hover { background: #2d2d5e; }
+
+    /* プロフィール */
+    .profile-card { background: #1a1a2e; color: #fff; border-radius: 10px; padding: 16px 22px; margin-bottom: 14px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .person-name { font-size: 1.3rem; font-weight: 800; }
+    .person-type { font-size: .75rem; color: #aaa; margin-top: 2px; }
+    .stat-items { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; }
+    .stat-item { text-align: center; }
+    .stat-item .sv { font-size: 1.05rem; font-weight: 700; }
+    .stat-item .sl { font-size: .72rem; color: #aaa; }
+
+    /* パネル */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .panel h3 { font-size: .78rem; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+
+    /* 共通テーブル */
+    .data-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .data-table th { text-align: center; font-size: .72rem; color: #888; padding: 4px 6px; border-bottom: 1px solid #eee; white-space: nowrap; }
+    .data-table td { text-align: center; padding: 5px 6px; border-bottom: 1px solid #f5f5f5; white-space: nowrap; }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table td.left { text-align: left; font-weight: 600; }
+
+    /* 回収率カラー */
+    .rr-100up { color:#dc2626; font-weight:700; }
+    .rr-90up  { color:#db2777; }
+    .rr-80up  { color:#d97706; }
+    .rr-low   { color:#9ca3af; }
+    .rr-fire  { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
+
+    /* コンビ行ハイライト */
+    tr.combo-hot td { background: #fff7ed; }
+
+    .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
+    .err { color: #c0392b; }
+    #result { display: none; }
+
+    /* 注目パターンバッジ */
+    .pattern-badge { display: inline-block; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; margin: 4px; font-size: .8rem; }
+    .pattern-badge.fire { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .patterns-wrap { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>👤 人物分析</h1>
+  <a class="back-link" href="/">← トップに戻る</a>
+</header>
+
+<main>
+  <div class="search-card">
+    <div class="type-toggle">
+      <button class="type-btn active" id="btn-jockey" onclick="setType('jockey')">騎手</button>
+      <button class="type-btn" id="btn-trainer" onclick="setType('trainer')">調教師</button>
+    </div>
+    <input class="search-input" id="filter-input" type="text" placeholder="絞り込み" autocomplete="off">
+    <select id="person-sel"><option value="">読込中…</option></select>
+    <button class="btn-show" id="btn-show">表示</button>
+  </div>
+
+  <div id="result"></div>
+  <div id="msg" class="msg">騎手または調教師をプルダウンから選択してください（選択するとすぐに表示されます）</div>
+</main>
+
+<script>
+const MARK_SYM = {'1':'◎','2':'○','3':'▲','4':'注','5':'△'};
+const ODDS_ORDER = ['~4倍','4~8倍','8~15倍','15~30倍','30倍以上'];
+
+let currentType = 'jockey';
+let allPersons = [];
+
+function setType(t) {
+  currentType = t;
+  document.getElementById('btn-jockey').className  = 'type-btn' + (t==='jockey'?' active':'');
+  document.getElementById('btn-trainer').className = 'type-btn' + (t==='trainer'?' active':'');
+  loadPersonList();
+}
+
+async function loadPersonList() {
+  document.getElementById('person-sel').innerHTML = '<option value="">読込中…</option>';
+  const res = await fetch(`/api/persons?type=${currentType}`);
+  allPersons = await res.json();
+  updateSelect('');
+}
+
+function updateSelect(q) {
+  const filtered = q.trim() ? allPersons.filter(p=>p.name.includes(q.trim())) : allPersons;
+  const sel = document.getElementById('person-sel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">選択してください</option>' +
+    filtered.map(p=>`<option value="${p.code}"${p.code===cur?' selected':''}>${p.name}（単${p.win_rr}%・n=${p.n?.toLocaleString()}）</option>`).join('');
+}
+
+document.getElementById('filter-input').addEventListener('input', e => updateSelect(e.target.value));
+
+document.getElementById('person-sel').addEventListener('change', e => {
+  if (e.target.value) loadAnalysis(e.target.value);
+});
+
+document.getElementById('btn-show').addEventListener('click', () => {
+  const code = document.getElementById('person-sel').value;
+  if (code) loadAnalysis(code);
+});
+
+function rrClass(v) {
+  if (!v && v!==0) return '';
+  const n = parseFloat(v);
+  if (n>=100) return 'rr-100up';
+  if (n>=90)  return 'rr-90up';
+  if (n>=80)  return 'rr-80up';
+  if (n<65)   return 'rr-low';
+  return '';
+}
+function rrSpan(v) {
+  if (v===null||v===undefined) return '—';
+  return `<span class="${rrClass(v)}">${v}</span>`;
+}
+function rrCell(v) {
+  if (v===null||v===undefined) return '—';
+  const n = parseFloat(v);
+  if (n>=100) return `<span class="rr-fire">${v}</span>`;
+  return `<span class="${rrClass(v)}">${v}</span>`;
+}
+
+async function loadAnalysis(code) {
+  document.getElementById('msg').textContent = '読み込み中…';
+  document.getElementById('msg').style.display = '';
+  document.getElementById('result').style.display = 'none';
+  try {
+    const res = await fetch(`/api/persons/${currentType}/${code}`);
+    if (!res.ok) throw new Error((await res.json()).error);
+    const data = await res.json();
+    render(data);
+    document.getElementById('msg').style.display = 'none';
+    document.getElementById('result').style.display = 'block';
+    history.replaceState(null,'',`/person.html?type=${currentType}&code=${code}`);
+  } catch(e) {
+    document.getElementById('msg').textContent = 'エラー: '+e.message;
+    document.getElementById('msg').className = 'msg err';
+  }
+}
+
+function render(d) {
+  const b = d.baseline || {};
+  const typeLabel = currentType === 'jockey' ? '騎手' : '調教師';
+  const partnerLabel = currentType === 'jockey' ? '調教師' : '騎手';
+
+  // 注目パターン検出
+  const hotCombos = (d.combos||[]).filter(c=>+(c.win_rr||0)>=100 && +(c.n||0)>=30);
+  const johoHot   = (d.by_joho||[]).filter(r=>+(r.win_rr||0)>=100);
+  const oddsHot   = (d.by_odds||[]).filter(r=>+(r.win_rr||0)>=100);
+
+  const html = `
+  <div class="profile-card">
+    <div>
+      <div class="person-name">${d.name}</div>
+      <div class="person-type">${typeLabel}（コード: ${d.code}）</div>
+    </div>
+    <div class="stat-items">
+      <div class="stat-item"><div class="sv">${(+b.n||0).toLocaleString()}</div><div class="sl">出走数</div></div>
+      <div class="stat-item"><div class="sv">${b.win_rate??'—'}%</div><div class="sl">勝率</div></div>
+      <div class="stat-item"><div class="sv">${b.place_rate??'—'}%</div><div class="sl">複勝率</div></div>
+      <div class="stat-item"><div class="sv ${rrClass(b.win_rr)}">${b.win_rr??'—'}</div><div class="sl">単回収</div></div>
+      <div class="stat-item"><div class="sv ${rrClass(b.place_rr)}">${b.place_rr??'—'}</div><div class="sl">複回収</div></div>
+    </div>
+  </div>
+
+  ${(hotCombos.length||johoHot.length||oddsHot.length) ? `
+  <div class="patterns-wrap">
+    ${hotCombos.map(c=>`<div class="pattern-badge fire">🔥 ${c.partner_name}コンビ 単回${c.win_rr}%（n=${c.n}）</div>`).join('')}
+    ${johoHot.map(r=>`<div class="pattern-badge fire">🔥 情報印${MARK_SYM[r.joho]||r.joho} 単回${r.win_rr}%（n=${r.n}）</div>`).join('')}
+    ${oddsHot.map(r=>`<div class="pattern-badge fire">🔥 ${r.odds_band} 単回${r.win_rr}%（n=${r.n}）</div>`).join('')}
+  </div>` : ''}
+
+  <!-- 上段: コンビ相性 ＋ 厩舎指数帯別（調教師）or 情報印別（騎手） -->
+  <div class="grid2">
+    <div class="panel">
+      <h3>${partnerLabel}別コンビ相性（単回収率順）</h3>
+      <table class="data-table">
+        <thead><tr><th class="left">${partnerLabel}</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${(d.combos||[]).map(c=>`
+        <tr class="${+(c.win_rr||0)>=100?'combo-hot':''}">
+          <td class="left">${c.partner_name||'—'}</td>
+          <td>${(+c.n||0).toLocaleString()}</td>
+          <td>${c.win_rate??'—'}%</td>
+          <td>${rrCell(c.win_rr)}</td>
+          <td>${rrSpan(c.place_rr)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+
+    ${currentType === 'trainer' && (d.by_kyusha||[]).length ? `
+    <div class="panel">
+      <h3>厩舎指数帯別成績</h3>
+      <table class="data-table">
+        <thead><tr><th class="left">厩舎指数帯</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${(d.by_kyusha||[]).map(r=>`
+        <tr>
+          <td class="left">${r.kyusha_band}</td>
+          <td>${(+r.n||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrCell(r.win_rr)}</td>
+          <td>${rrSpan(r.place_rr)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : `
+    <div class="panel">
+      <h3>情報印別成績</h3>
+      <table class="data-table">
+        <thead><tr><th>印</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${(d.by_joho||[]).map(r=>`
+        <tr>
+          <td style="font-weight:700">${MARK_SYM[r.joho]||r.joho}</td>
+          <td>${(+r.n||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrCell(r.win_rr)}</td>
+          <td>${rrSpan(r.place_rr)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`}
+  </div>
+
+  <!-- 下段: 調教師は[情報印 | オッズ帯]、騎手は[オッズ帯 full] -->
+  ${currentType === 'trainer' ? `
+  <div class="grid2">
+    <div class="panel">
+      <h3>情報印別成績</h3>
+      <table class="data-table">
+        <thead><tr><th>印</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${(d.by_joho||[]).map(r=>`
+        <tr>
+          <td style="font-weight:700">${MARK_SYM[r.joho]||r.joho}</td>
+          <td>${(+r.n||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrCell(r.win_rr)}</td>
+          <td>${rrSpan(r.place_rr)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h3>基準オッズ帯別成績</h3>
+      <table class="data-table">
+        <thead><tr><th class="left">オッズ帯</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+        <tbody>${(d.by_odds||[]).sort((a,b)=>ODDS_ORDER.indexOf(a.odds_band)-ODDS_ORDER.indexOf(b.odds_band)).map(r=>`
+        <tr>
+          <td class="left">${r.odds_band}</td>
+          <td>${(+r.n||0).toLocaleString()}</td>
+          <td>${r.win_rate??'—'}%</td>
+          <td>${rrCell(r.win_rr)}</td>
+          <td>${rrSpan(r.place_rr)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  </div>` : `
+  <div class="panel" style="margin-bottom:14px">
+    <h3>基準オッズ帯別成績</h3>
+    <table class="data-table">
+      <thead><tr><th class="left">オッズ帯</th><th>n</th><th>勝率</th><th>単回収</th><th>複回収</th></tr></thead>
+      <tbody>${(d.by_odds||[]).sort((a,b)=>ODDS_ORDER.indexOf(a.odds_band)-ODDS_ORDER.indexOf(b.odds_band)).map(r=>`
+      <tr>
+        <td class="left">${r.odds_band}</td>
+        <td>${(+r.n||0).toLocaleString()}</td>
+        <td>${r.win_rate??'—'}%</td>
+        <td>${rrCell(r.win_rr)}</td>
+        <td>${rrSpan(r.place_rr)}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>`}
+  `;
+  document.getElementById('result').innerHTML = html;
+}
+
+// 初期ロード
+(async()=>{
+  const p = new URLSearchParams(location.search);
+  if (p.get('type')) { currentType = p.get('type'); setType(currentType); }
+  await loadPersonList();
+  if (p.get('code')) {
+    document.getElementById('person-sel').value = p.get('code');
+    loadAnalysis(p.get('code'));
+  }
+})();
+</script>
+</body>
+</html>
