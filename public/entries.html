@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>出馬表 - JRDB ポータル</title>
+  <title>出馬表 - RACE INSIGHT</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
@@ -18,7 +18,24 @@
     .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
     .back-link:hover { text-decoration: underline; }
 
-    main { max-width: 1100px; margin: 16px auto; padding: 0 20px; }
+    main { max-width: 1400px; margin: 16px auto; padding: 0 20px; }
+
+    /* Race nav */
+    .race-nav {
+      background: #fff; border-radius: 10px; padding: 10px 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .race-nav-label { font-size: .75rem; color: #888; margin-right: 4px; white-space: nowrap; }
+    .race-nav-btn {
+      padding: 4px 10px; border: 1px solid #f0f0f0; border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: .82rem; font-family: inherit;
+      color: #374151; transition: background .1s;
+    }
+    .race-nav-btn:hover { background: #f3f4f6; }
+    .race-nav-btn.active {
+      background: #1a1a2e; color: #fff; border-color: #1a1a2e; font-weight: 700;
+    }
 
     /* Race info */
     .race-card {
@@ -97,9 +114,9 @@
 
     /* 印 */
     .mark { font-size: 1rem; font-weight: 700; }
-    .mark-1 { color: #dc2626; }  /* ◎ */
-    .mark-2 { color: #2563eb; }  /* ○ */
-    .mark-3 { color: #d97706; }  /* ▲ */
+    .mark-1 { color: #dc2626; }  /* ◎赤 */
+    .mark-2 { color: #16a34a; }  /* ○緑 */
+    .mark-3 { color: #16a34a; }  /* ▲緑 */
     .mark-4 { color: #333; }  /* 注 */
     .mark-5 { color: #333; }  /* △ */
     .mark-6 { color: #333; }  /* ▽ */
@@ -114,11 +131,25 @@
     /* 厩舎指数 */
     .stable-good { color: #dc2626; font-weight: 600; }
     .stable-bad  { color: #7c3aed; font-weight: 600; }
-    /* コンビ回収率 */
-    .combo-s   { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 4px; }
-    .combo-a   { background:#fde68a; color:#92400e; font-weight:700; border-radius:3px; padding:1px 4px; }
-    .combo-b   { background:#d1fae5; color:#065f46; border-radius:3px; padding:1px 4px; }
+    /* 回収率カラー（分析ページ共通） */
+    .rr-fire   { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
+    .rr-100up  { color:#dc2626; font-weight:700; }
+    .rr-90up   { color:#db2777; }
+    .rr-80up   { color:#d97706; }
+    .rr-low    { color:#9ca3af; }
     .combo-n   { color:#9ca3af; font-size:.72rem; }
+    /* 着順・払戻 */
+    .result-1st  { color:#dc2626; font-weight:700; }
+    .result-2nd  { color:#2563eb; font-weight:700; }
+    .result-3rd  { color:#16a34a; font-weight:700; }
+    .result-pay  { font-size:.78rem; color:#374151; }
+    .result-ijou { color:#9ca3af; font-size:.72rem; }
+    /* 調教SP */
+    .sp-a { background:#fee2e2; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 6px; }
+    .sp-b { background:#fef9c3; color:#92400e; font-weight:600; border-radius:3px; padding:1px 6px; }
+    .sp-c { color:#9ca3af; }
+    .sp-d { background:#eff6ff; color:#1e40af; border-radius:3px; padding:1px 6px; }
+    .sp-e { background:#1f2937; color:#f9fafb; font-weight:700; border-radius:3px; padding:1px 6px; }
     .stable-yellow { background: #fef08a; }
 
     .horse-name { font-weight: 600; }
@@ -183,6 +214,7 @@
 </header>
 
 <main>
+  <div id="race-nav-wrap"></div>
   <div id="race-card-wrap">
     <div class="loading"><div class="spinner"></div>読み込み中...</div>
   </div>
@@ -191,25 +223,27 @@
     <table>
       <thead>
         <tr>
-          <th>枠</th>
-          <th>馬番</th>
-          <th class="left">馬名</th>
-          <th>B</th>
-          <th>脚質</th>
-          <th class="group-sep">オッズ</th>
-          <th class="group-sep left">騎手</th>
-          <th class="left">厩舎</th>
-          <th class="group-sep" title="騎手×調教師コンビの単勝回収率">コンビ</th>
-          <th class="group-sep" colspan="2">情報印</th>
-          <th class="group-sep" colspan="2">展開印</th>
-          <th class="group-sep" colspan="2">IDM印</th>
-          <th class="group-sep rank-col" style="width:58px">前3F</th>
-          <th class="rank-col" style="width:58px">後3F</th>
-          <th class="group-sep">厩舎指数</th>
-          <th class="group-sep">追切指数</th>
-          <th>仕上指数</th>
-          <th class="group-sep" title="オリジナル調教スコア&#10;S≥80 A≥70 B≥60 C≥40 D<40">調教スコア</th>
+          <th rowspan="2">枠</th>
+          <th rowspan="2">馬番</th>
+          <th rowspan="2" class="left">馬名</th>
+          <th rowspan="2">B</th>
+          <th rowspan="2">脚質</th>
+          <th rowspan="2" class="group-sep">オッズ</th>
+          <th rowspan="2" class="group-sep left">騎手</th>
+          <th rowspan="2" class="left">厩舎</th>
+          <th rowspan="2" class="group-sep">騎×厩</th>
+          <th rowspan="2" class="group-sep" colspan="2">情報印</th>
+          <th rowspan="2" class="group-sep" colspan="2">展開印</th>
+          <th rowspan="2" class="group-sep" colspan="2">IDM印</th>
+          <th rowspan="2" class="group-sep rank-col" style="width:58px">前3F</th>
+          <th rowspan="2" class="rank-col" style="width:58px">後3F</th>
+          <th rowspan="2" class="group-sep">厩舎指数</th>
+          <th rowspan="2" class="group-sep">調教SP</th>
+          <th rowspan="2" class="group-sep">着順</th>
+          <th rowspan="2">単勝</th>
+          <th rowspan="2">複勝</th>
         </tr>
+        <tr></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -241,6 +275,56 @@
     const m = RANK_MARK[rank];
     if (!m) return '<span class="mark mark-none">—</span>';
     return `<span class="mark ${m.cls}">${m.sym}</span>`;
+  }
+
+  // ──────────────────────────────────────────────────
+  // 調教SP グレード計算
+  // ──────────────────────────────────────────────────
+  function calcChokyoSP(rows) {
+    const toNum = v => parseFloat(String(v ?? '').trim()) || 0;
+    const oiArr  = rows.map(r => toNum(r.oi_index));
+    const shiArr = rows.map(r => toNum(r.shiage_index));
+
+    const validOi  = oiArr.filter(v => v > 0);
+    const validShi = shiArr.filter(v => v > 0);
+    if (validOi.length < 2 || validShi.length < 2) return rows.map(() => null);
+
+    const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+    const sd  = a => { const m = avg(a); return Math.sqrt(a.reduce((s, v) => s + (v-m)**2, 0) / a.length); };
+    const oiMean = avg(validOi), oiSd = sd(validOi);
+    const shiMean = avg(validShi), shiSd = sd(validShi);
+
+    // レース内ランク（同値は同順位・降順）
+    const rankInRace = arr => {
+      const sorted = [...arr].filter(v => v > 0).sort((a, b) => b - a);
+      return arr.map(v => v > 0 ? sorted.indexOf(v) + 1 : null);
+    };
+    const oiRanks  = rankInRace(oiArr);
+    const shiRanks = rankInRace(shiArr);
+
+    return rows.map((r, i) => {
+      if (oiArr[i] <= 0 || shiArr[i] <= 0) return null;
+
+      const rankPt =
+        (oiRanks[i]===1 ? 3 : oiRanks[i]===2 ? 2 : oiRanks[i]===3 ? 1 : 0) +
+        (shiRanks[i]===1 ? 3 : shiRanks[i]===2 ? 2 : shiRanks[i]===3 ? 1 : 0);
+
+      const oiZ  = oiSd  > 0 ? (oiArr[i]  - oiMean)  / oiSd  : 0;
+      const shiZ = shiSd > 0 ? (shiArr[i] - shiMean) / shiSd : 0;
+      const zPt  = Math.min(0, Math.round((oiZ + shiZ) * 1.0));
+
+      const yj = String(r.chokyo_yajirushi ?? '').trim();
+      const hb = String(r.hohbokusaki_rank  ?? '').trim();
+      const yjPt = yj === '4' ? -2 : yj === '5' ? -4 : 0;
+      const hbPt = hb === 'E' ? -4 : hb === 'D' ? -2 : 0;
+
+      const sc = rankPt + zPt + yjPt + hbPt;
+      if (sc >= 4) return 'A';
+      if (sc >= 2) return 'B';
+      if (sc >= -1) return 'C';
+      if (sc >= -4) return 'D';
+      return 'E';
+    });
   }
 
   // ──────────────────────────────────────────────────
@@ -373,19 +457,46 @@
       return;
     }
     try {
-      const [raceRes, entriesRes] = await Promise.all([
-        fetch(`/api/races/${key}`),
+      // Step1: レース情報取得（ymd・course_code がレース一覧取得に必要）
+      const raceRes = await fetch(`/api/races/${key}`);
+      if (!raceRes.ok) throw new Error('レース情報の取得に失敗しました');
+      const race = await raceRes.json();
+
+      // Step2: 出走馬一覧 + 同日同場のレース一覧を並列取得
+      const [entriesRes, racesRes] = await Promise.all([
         fetch(`/api/races/${key}/entries`),
+        fetch(`/api/races?date=${race.ymd}&course=${race.course_code}`),
       ]);
-      if (!raceRes.ok || !entriesRes.ok) throw new Error('データの取得に失敗しました');
-      const race    = await raceRes.json();
-      const entries = await entriesRes.json();
+      if (!entriesRes.ok) throw new Error('出走馬データの取得に失敗しました');
+      const entries  = await entriesRes.json();
+      const raceList = racesRes.ok ? await racesRes.json() : [];
+
+      renderRaceNav(raceList, race);
       renderRaceCard(race);
       renderTable(entries.rows, race);
     } catch(e) {
       document.getElementById('race-card-wrap').innerHTML =
         `<div class="error-msg">${e.message}</div>`;
     }
+  }
+
+  function renderRaceNav(raceList, currentRace) {
+    const wrap = document.getElementById('race-nav-wrap');
+    if (!raceList.length) { wrap.innerHTML = ''; return; }
+    const course = COURSE_NAME[currentRace.course_code] || currentRace.course_code;
+    const sorted = [...raceList].sort((a, b) =>
+      parseInt(a.race_num) - parseInt(b.race_num));
+    const btns = sorted.map(r => {
+      const rnum = parseInt(r.race_num);
+      const rkey = `${r.course_code}${r.year_code}${r.kai}${r.day_code}${String(r.race_num).padStart(2,'0')}`;
+      const isActive = rnum === parseInt(currentRace.race_num);
+      return `<button class="race-nav-btn${isActive ? ' active' : ''}"
+                onclick="location.href='/entries.html?key=${rkey}'">${rnum}R</button>`;
+    }).join('');
+    wrap.innerHTML = `<div class="race-nav">
+      <span class="race-nav-label">${fmtDate(currentRace.ymd)} ${course}</span>
+      ${btns}
+    </div>`;
   }
 
   function renderRaceCard(race) {
@@ -400,7 +511,7 @@
     const dist     = race.distance?.trim() ? race.distance.trim() + 'm' : '—';
     const dir      = race.migihidari === '1' ? '右' : race.migihidari === '2' ? '左' : '';
     const heads    = race.heads ? parseInt(race.heads) + '頭' : '—';
-    document.title = `${name} ${course}${rnum}R 出馬表 - JRDB`;
+    document.title = `${name} ${course}${rnum}R 出馬表 - RACE INSIGHT`;
     document.getElementById('race-card-wrap').innerHTML = `
       <div class="race-card">
         <div class="race-rnum">${rnum}R</div>
@@ -443,6 +554,8 @@
         if (!isNaN(v)) idm3rdValue = v;
       }
     });
+
+    const spGrades = calcChokyoSP(rows);
 
     const html = rows.map((r, i) => {
       // 枠番
@@ -531,9 +644,6 @@
         const cls = v >= 60 ? 'training-good' : v < 40 ? 'training-bad' : '';
         return `<span class="${cls}">${v}</span>`;
       }
-      const oiDisp     = trainingIdxHtml(r.oi_index);
-      const shiageDisp = trainingIdxHtml(r.shiage_index);
-
       // 調教スコア計算 (Item1, 2, 4, 5)
       const raceClass = String(race.class ?? '').trim();
       const ts = calcTrainingScore(r, raceClass);
@@ -557,12 +667,14 @@
         <td class="group-sep"${oddsRank === 1 ? ' style="background:#fce7f3"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#dcfce7"' : ''}>${oddsDisp}</td>
         <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
         <td class="left">${r.trainer_name?.trim() || '—'}</td>
-        <td class="group-sep">${(()=>{
-          const rr = r.combo_win_rr;
-          const n  = r.combo_n;
-          if (!rr && rr!==0) return '<span class="combo-n">—</span>';
-          const cls = rr>=100?'combo-s':rr>=85?'combo-a':rr>=75?'combo-b':'combo-n';
-          return `<span class="${cls}">${rr}</span><span class="combo-n" style="display:block;font-size:.65rem">n=${n}</span>`;
+        <td class="group-sep" title="${r.combo_n != null ? String(r.combo_n) : ''}">${(()=>{
+          const rr = r.combo_place_rr;
+          if (rr == null) return '<span class="rr-low">—</span>';
+          if (rr >= 100) return '<span class="rr-fire">A</span>';
+          if (rr >=  90) return '<span class="rr-90up">B</span>';
+          if (rr >=  80) return '<span class="rr-80up">C</span>';
+          if (rr >=  65) return 'D';
+          return '<span class="rr-low">E</span>';
         })()}</td>
         <td class="group-sep mark-col${infoGray ? ' cell-gray' : ''}">${infoMark}</td><td class="idx-col${infoGray ? ' cell-gray' : ''}">${infoIdxCell}</td>
         <td class="group-sep mark-col${goalGray ? ' cell-gray' : ''}">${goalMark}</td><td class="idx-col${goalGray ? ' cell-gray' : ''}">${goalIdxCell}</td>
@@ -570,9 +682,33 @@
         <td class="group-sep rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
         <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
         <td class="group-sep${stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
-        <td class="group-sep">${oiDisp}</td>
-        <td>${shiageDisp}</td>
-        <td class="group-sep ts-cell">${tsBadgeHtml}</td>
+        <td class="group-sep">${(()=>{
+          const g = spGrades[i];
+          if (!g) return '<span class="sp-c">—</span>';
+          return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
+        })()}</td>
+        <td class="group-sep">${(()=>{
+          const ijou = String(r.result_ijou ?? '').trim();
+          if (ijou === '1') return '<span class="result-ijou">取消</span>';
+          if (ijou === '2') return '<span class="result-ijou">除外</span>';
+          if (ijou !== '' && ijou !== '0') return `<span class="result-ijou">${ijou}</span>`;
+          const ord = parseInt(String(r.result_order ?? '').trim());
+          if (isNaN(ord) || ord <= 0) return '—';
+          const cls = ord===1?'result-1st':ord===2?'result-2nd':ord===3?'result-3rd':'';
+          return `<span class="${cls}">${ord}</span>`;
+        })()}</td>
+        <td>${(()=>{
+          const ord = parseInt(String(r.result_order ?? '').trim());
+          if (ord !== 1) return '—';
+          const v = parseInt(String(r.result_win ?? '').trim());
+          return isNaN(v)||v<=0 ? '—' : `<span class="result-pay">${v.toLocaleString()}</span>`;
+        })()}</td>
+        <td>${(()=>{
+          const ord = parseInt(String(r.result_order ?? '').trim());
+          if (isNaN(ord) || ord > 3 || ord <= 0) return '—';
+          const v = parseInt(String(r.result_place ?? '').trim());
+          return isNaN(v)||v<=0 ? '—' : `<span class="result-pay">${v.toLocaleString()}</span>`;
+        })()}</td>
       </tr>`;
     }).join('');
 

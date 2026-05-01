@@ -232,7 +232,11 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
               c.isshuumae_oi_index,
               cr.win_recovery  AS combo_win_rr,
               cr.place_recovery AS combo_place_rr,
-              cr.total_count   AS combo_n
+              cr.total_count   AS combo_n,
+              s.order_of_finish AS result_order,
+              s.win             AS result_win,
+              s.place           AS result_place,
+              s.ijou_kubun      AS result_ijou
        FROM T_KYI k
        LEFT JOIN T_CYB c
          ON  c.course_code = k.course_code AND c.year_code = k.year_code
@@ -241,6 +245,10 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        LEFT JOIN T_COMBO_RECOVERY cr
          ON  cr.kishu_code   = k.kishu_code
          AND cr.trainer_code = k.trainer_code
+       LEFT JOIN T_SED s
+         ON  s.course_code = k.course_code AND s.year_code = k.year_code
+         AND s.kai = k.kai AND s.day_code = k.day_code
+         AND s.race_num = k.race_num AND s.umaban = k.uma_num
        WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?
        ORDER BY CAST(k.uma_num AS UNSIGNED)`,
       [course_code, year_code, kai, day_code, race_num]
