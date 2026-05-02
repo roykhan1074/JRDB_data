@@ -1,0 +1,107 @@
+/* ============================================================
+   RACE INSIGHT — Unified Color System
+   Primary interactive: #0071e3  (Apple Blue)
+   Primary hover:       #0077ed
+   Page background:     #f5f5f7  (Apple Light Gray)
+   ============================================================ */
+
+
+
+/* Page backgrounds */
+body { background: #f5f5f7 !important; }
+
+/* Back links (全ページ共通) */
+.back-link { color: #0071e3 !important; }
+.back-link:hover { color: #0077ed !important; }
+
+/* Primary buttons */
+.btn-run    { background: #0071e3 !important; }
+.btn-search { background: #0071e3 !important; }
+.btn-show   { background: #0071e3 !important; }
+.btn-run:hover:not(:disabled) { background: #0077ed !important; }
+.btn-search:hover              { background: #0077ed !important; }
+.btn-show:hover                { background: #0077ed !important; }
+
+/* Focus border */
+.form-group input:focus,
+.form-group select:focus { border-color: #0071e3 !important; }
+
+/* Download: progress bar / checked item / status text */
+.progress-bar-fill           { background: #0071e3 !important; }
+.prefix-item.checked         { background: #e8f3ff !important; border-color: #0071e3 !important; }
+.log-item-success            { color: #0071e3 !important; }
+
+/* Download: spinner */
+.spinner { border-top-color: #0071e3 !important; }
+
+/* Analyze: summary row accent */
+.summary-row td { border-top-color: #0071e3 !important; background: #e8f3ff !important; }
+
+/* Index: card hover */
+.card:hover {
+  border-color: #0071e3 !important;
+  box-shadow: 0 4px 16px rgba(0,113,227,.15) !important;
+}
+
+/* Search: btn-search active / focus */
+#btn-search { background: #0071e3 !important; }
+
+/* ── Navigation bar ──────────────────────────────────────── */
+header {
+  padding: 0 32px !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 200 !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  gap: 0;
+}
+
+.nav-logo {
+  color: #fff;
+  text-decoration: none;
+  font-size: .92rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-right: 28px;
+  opacity: .92;
+  transition: opacity .15s;
+}
+.nav-logo:hover { opacity: 1; }
+
+.nav-links {
+  list-style: none;
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-links li a {
+  display: block;
+  color: rgba(255,255,255,.62);
+  text-decoration: none;
+  font-size: .8rem;
+  padding: 5px 11px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: color .15s, background .15s;
+}
+.nav-links li a:hover {
+  color: #fff;
+  background: rgba(255,255,255,.1);
+}
+.nav-links li a.nav-active {
+  color: #fff;
+  font-weight: 600;
+}

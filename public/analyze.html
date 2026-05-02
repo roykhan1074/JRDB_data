@@ -84,11 +84,11 @@
 
     .btn-row { display: flex; gap: 8px; margin-top: 4px; }
     .btn-analyze {
-      flex: 1; padding: 12px; background: #8e44ad; color: #fff;
+      flex: 1; padding: 12px; background: #0071e3; color: #fff;
       border: none; border-radius: 6px; font-size: 1rem; font-weight: 600;
       cursor: pointer; transition: background .2s;
     }
-    .btn-analyze:hover:not(:disabled) { background: #7d3c98; }
+    .btn-analyze:hover:not(:disabled) { background: #0077ed; }
     .btn-analyze:disabled { background: #aaa; cursor: not-allowed; }
     .btn-reset {
       padding: 12px 20px; background: #ecf0f1; color: #555;
@@ -150,6 +150,7 @@
     }
     .ac-list li:hover { background: #f0f4ff; }
   </style>
+  <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
 <div class="container">
@@ -722,5 +723,6 @@
     document.getElementById('status-bar').className = 'status-bar';
   });
 </script>
+<script src="/nav.js"></script>
 </body>
 </html>

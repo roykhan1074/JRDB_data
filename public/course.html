@@ -112,6 +112,7 @@
     .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
     .err { color: #dc2626; }
   </style>
+  <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
 <header>
@@ -449,5 +450,6 @@ function render(data, venue, tds, dist) {
 // ── 起動 ────────────────────────────────
 loadCourses().then(() => applyUrlParams());
 </script>
+<script src="/nav.js"></script>
 </body>
 </html>

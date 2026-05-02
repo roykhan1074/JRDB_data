@@ -20,6 +20,65 @@
 
     main { max-width: 1400px; margin: 16px auto; padding: 0 20px; }
 
+    /* ── 統合レースヘッダー ─────────────────────────── */
+    .race-header-card {
+      display: flex; background: #fff; border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .race-header-left {
+      flex: 1; min-width: 0; display: flex; flex-direction: column;
+    }
+    .rh-nav {
+      display: flex; flex-wrap: wrap; gap: 5px;
+      padding: 10px 16px; border-bottom: 1px solid #f0f0f0;
+    }
+    .rh-info {
+      display: flex; align-items: center; gap: 20px;
+      padding: 12px 18px; flex: 1;
+    }
+    .race-header-right {
+      width: 220px; flex-shrink: 0;
+      border-left: 1px solid #f0f0f0;
+      display: flex; align-items: center; justify-content: center;
+      padding: 12px 16px;
+    }
+
+    /* ── コース別ファクターパネル ───────────────────── */
+    .cf-panel { width: 100%; }
+    .cf-title {
+      font-size: .7rem; color: #999; font-weight: 600;
+      letter-spacing: .04em; margin-bottom: 8px; text-align: center;
+    }
+    .cf-table {
+      width: 100%; border-collapse: collapse; font-size: .82rem;
+    }
+    .cf-table thead th {
+      font-size: .68rem; color: #aaa; font-weight: 600;
+      padding: 2px 4px; text-align: center;
+      background: none; color: #aaa; position: static;
+    }
+    .cf-table tbody td {
+      padding: 5px 4px; text-align: center;
+      border: none; background: none;
+    }
+    .cf-row-label {
+      font-size: .75rem; color: #666; font-weight: 600;
+      text-align: right !important; padding-right: 8px !important;
+      white-space: nowrap;
+    }
+    .cf-grade {
+      display: inline-block; min-width: 26px; padding: 3px 2px;
+      border-radius: 4px; font-size: .82rem; font-weight: 700;
+      text-align: center;
+    }
+    .cf-grade.rr-fire { background:#fecaca; color:#991b1b; }
+    .cf-grade.rr-90up { color:#db2777; }
+    .cf-grade.rr-80up { color:#d97706; }
+    .cf-grade.rr-low  { color:#9ca3af; }
+    .cf-grade.cf-d    { color:#374151; }
+    .cf-none { color:#d1d5db; font-size:.75rem; }
+
     /* Race nav */
     .race-nav {
       background: #fff; border-radius: 10px; padding: 10px 14px;
@@ -205,6 +264,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-msg { background: #fff; border-radius: 8px; padding: 40px; text-align: center; color: #c0392b; }
   </style>
+  <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
 
@@ -214,8 +274,7 @@
 </header>
 
 <main>
-  <div id="race-nav-wrap"></div>
-  <div id="race-card-wrap">
+  <div id="race-header-wrap">
     <div class="loading"><div class="spinner"></div>読み込み中...</div>
   </div>
 
@@ -452,7 +511,7 @@
   async function load() {
     const key = getKey();
     if (!/^\d{8}$/.test(key)) {
-      document.getElementById('race-card-wrap').innerHTML =
+      document.getElementById('race-header-wrap').innerHTML =
         '<div class="error-msg">無効なレースキーです</div>';
       return;
     }
@@ -462,72 +521,92 @@
       if (!raceRes.ok) throw new Error('レース情報の取得に失敗しました');
       const race = await raceRes.json();
 
-      // Step2: 出走馬一覧 + 同日同場のレース一覧を並列取得
-      const [entriesRes, racesRes] = await Promise.all([
+      // Step2: 出走馬一覧 + 同日同場レース一覧 + コース分析を並列取得
+      const dist = String(race.distance ?? '').trim();
+      const [entriesRes, racesRes, courseRes] = await Promise.all([
         fetch(`/api/races/${key}/entries`),
         fetch(`/api/races?date=${race.ymd}&course=${race.course_code}`),
+        (dist && race.tds_code)
+          ? fetch(`/api/course-analysis?course_code=${race.course_code}&tds_code=${race.tds_code}&distance=${dist}`)
+          : Promise.resolve(null),
       ]);
       if (!entriesRes.ok) throw new Error('出走馬データの取得に失敗しました');
-      const entries  = await entriesRes.json();
-      const raceList = racesRes.ok ? await racesRes.json() : [];
+      const entries    = await entriesRes.json();
+      const raceList   = racesRes.ok ? await racesRes.json() : [];
+      const courseData = (courseRes?.ok) ? await courseRes.json() : null;
 
-      renderRaceNav(raceList, race);
-      renderRaceCard(race);
+      renderRaceHeader(raceList, race, courseData);
       renderTable(entries.rows, race);
     } catch(e) {
-      document.getElementById('race-card-wrap').innerHTML =
+      document.getElementById('race-header-wrap').innerHTML =
         `<div class="error-msg">${e.message}</div>`;
     }
   }
 
-  function renderRaceNav(raceList, currentRace) {
-    const wrap = document.getElementById('race-nav-wrap');
-    if (!raceList.length) { wrap.innerHTML = ''; return; }
-    const course = COURSE_NAME[currentRace.course_code] || currentRace.course_code;
-    const sorted = [...raceList].sort((a, b) =>
-      parseInt(a.race_num) - parseInt(b.race_num));
-    const btns = sorted.map(r => {
-      const rnum = parseInt(r.race_num);
-      const rkey = `${r.course_code}${r.year_code}${r.kai}${r.day_code}${String(r.race_num).padStart(2,'0')}`;
-      const isActive = rnum === parseInt(currentRace.race_num);
-      return `<button class="race-nav-btn${isActive ? ' active' : ''}"
-                onclick="location.href='/entries.html?key=${rkey}'">${rnum}R</button>`;
-    }).join('');
-    wrap.innerHTML = `<div class="race-nav">
-      <span class="race-nav-label">${fmtDate(currentRace.ymd)} ${course}</span>
-      ${btns}
-    </div>`;
-  }
+  function renderRaceHeader(raceList, race, courseData) {
+    const course    = COURSE_NAME[race.course_code] || race.course_code;
+    const rnum      = parseInt(race.race_num);
+    const name      = race.race_name_9char?.trim() || race.race_name?.trim() || `${rnum}R`;
+    const badgeText = GRADE_LABEL[race.grade] || CLASS_LABEL[String(race.class ?? '').trim()] || '';
+    const tds       = TDS_LABEL[race.tds_code] || '';
+    const tdsBadge  = TDS_BADGE[race.tds_code] || '';
+    const dist      = race.distance?.trim() ? race.distance.trim() + 'm' : '—';
+    const dir       = race.migihidari === '1' ? '右' : race.migihidari === '2' ? '左' : '';
+    const heads     = race.heads ? parseInt(race.heads) + '頭' : '—';
+    document.title  = `${name} ${course}${rnum}R 出馬表 - RACE INSIGHT`;
 
-  function renderRaceCard(race) {
-    const course   = COURSE_NAME[race.course_code] || race.course_code;
-    const rnum     = parseInt(race.race_num);
-    const name     = race.race_name_9char?.trim() || race.race_name?.trim() || `${rnum}R`;
-    const grade    = GRADE_LABEL[race.grade] || '';
-    const cls      = CLASS_LABEL[String(race.class ?? '').trim()] || '';
-    const badgeText = grade || cls;
-    const tds      = TDS_LABEL[race.tds_code] || '';
-    const tdsBadge = TDS_BADGE[race.tds_code] || '';
-    const dist     = race.distance?.trim() ? race.distance.trim() + 'm' : '—';
-    const dir      = race.migihidari === '1' ? '右' : race.migihidari === '2' ? '左' : '';
-    const heads    = race.heads ? parseInt(race.heads) + '頭' : '—';
-    document.title = `${name} ${course}${rnum}R 出馬表 - RACE INSIGHT`;
-    document.getElementById('race-card-wrap').innerHTML = `
-      <div class="race-card">
-        <div class="race-rnum">${rnum}R</div>
-        <div class="race-main">
-          <div class="race-name">
-            ${name}
-            ${badgeText ? `<span class="badge badge-g1" style="vertical-align:middle">${badgeText}</span>` : ''}
-          </div>
-          <div class="race-meta">
-            <span>📅 ${fmtDate(race.ymd)}</span>
-            <span>🏟 ${course}</span>
-            <span>⏰ ${fmtTime(race.start_time)} 発走</span>
-            <span>${tds ? `<span class="badge ${tdsBadge}">${tds}</span>` : ''} ${dir}${dist}</span>
-            <span>🐎 ${heads}</span>
+    // ナビボタン
+    const sorted = [...raceList].sort((a,b) => parseInt(a.race_num)-parseInt(b.race_num));
+    const navBtns = sorted.map(r => {
+      const rk = `${r.course_code}${r.year_code}${r.kai}${r.day_code}${String(r.race_num).padStart(2,'0')}`;
+      const active = parseInt(r.race_num) === rnum;
+      return `<button class="race-nav-btn${active?' active':''}" onclick="location.href='/entries.html?key=${rk}'">${parseInt(r.race_num)}R</button>`;
+    }).join('');
+
+    // ファクターパネル
+    const factorsHtml = (() => {
+      if (!courseData?.factors) return '';
+      const f = courseData.factors;
+      const grade = (type, val) => {
+        const row = (f[type]||[]).find(r => String(r.factor_value).trim()===val);
+        if (!row) return `<span class="cf-none">—</span>`;
+        const rr = row.place_recovery;
+        const [g,cls] = rr>=100?['A','rr-fire']:rr>=90?['B','rr-90up']:rr>=80?['C','rr-80up']:rr>=65?['D','cf-d']:['E','rr-low'];
+        return `<span class="cf-grade ${cls}">${g}</span>`;
+      };
+      const ROWS = [
+        { label:'IDM印', vals:['1','2','3'],     type:'idm_mark'  },
+        { label:'前3F',  vals:['1','2~3','4~6'], type:'ten_rank'  },
+        { label:'後3F',  vals:['1','2~3','4~6'], type:'agari_rank'},
+      ];
+      const hdrs = ['1位','2~3','4~6'];
+      return `<div class="cf-panel">
+        <table class="cf-table">
+          <thead><tr><th></th>${hdrs.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${ROWS.map(r=>`<tr><td class="cf-row-label">${r.label}</td>${r.vals.map(v=>`<td>${grade(r.type,v)}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+    })();
+
+    document.getElementById('race-header-wrap').innerHTML = `
+      <div class="race-header-card">
+        <div class="race-header-left">
+          <div class="rh-nav">${navBtns}</div>
+          <div class="rh-info">
+            <div class="race-rnum">${rnum}R</div>
+            <div class="race-main">
+              <div class="race-name">${name}${badgeText?`<span class="badge badge-g1" style="vertical-align:middle;margin-left:6px">${badgeText}</span>`:''}</div>
+              <div class="race-meta">
+                <span>📅 ${fmtDate(race.ymd)}</span>
+                <span>🏟 ${course}</span>
+                <span>⏰ ${fmtTime(race.start_time)} 発走</span>
+                <span>${tds?`<span class="badge ${tdsBadge}">${tds}</span>`:''} ${dir}${dist}</span>
+                <span>🐎 ${heads}</span>
+              </div>
+            </div>
           </div>
         </div>
+        ${factorsHtml ? `<div class="race-header-right">${factorsHtml}</div>` : ''}
       </div>`;
   }
 
@@ -749,5 +828,6 @@
     if (!e.relatedTarget || !e.relatedTarget.closest('[data-tip]')) _hideTip();
   });
 </script>
+<script src="/nav.js"></script>
 </body>
 </html>

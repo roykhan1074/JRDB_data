@@ -116,6 +116,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
+  <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
 <div class="container">
@@ -190,7 +191,7 @@
     const n    = countDays(from, to);
     if (!from || !to) { el.textContent = ''; return; }
     if (from > to) { el.textContent = '開始日付は終了日付以前にしてください'; el.style.color = '#e74c3c'; return; }
-    el.style.color = '#3498db';
+    el.style.color = '#0071e3';
     el.textContent = `${n}日分を処理します`;
   }
 
@@ -342,5 +343,6 @@
     }
   });
 </script>
+<script src="/nav.js"></script>
 </body>
 </html>

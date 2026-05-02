@@ -95,71 +95,76 @@
       color: #9ca3af;
     }
   </style>
+  <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
 
 <header>
   <div>
-    <h1>🔍 RACE INSIGHT</h1>
-    <div class="subtitle">Japan Racing Database 管理画面</div>
+    <h1>
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" style="display:inline-block;vertical-align:text-bottom;margin-right:8px">
+        <circle cx="9" cy="9" r="7" stroke="white" stroke-width="1.8"/>
+        <path d="M5.5 11L7.5 7.5L10 10L12 6.5" stroke="#f0c040" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="14" y1="14" x2="20.5" y2="20.5" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>RACE INSIGHT</h1>
   </div>
 </header>
 
 <main>
-  <div class="section-title">データ管理</div>
   <div class="card-grid">
 
     <a class="card" href="/download.html">
       <div class="card-icon blue">⬇️</div>
       <div class="card-title">JRDB データ取込</div>
       <div class="card-desc">JRDBからデータをダウンロードし、変換・DBロードまで一括実行</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/stats.html">
       <div class="card-icon green">📊</div>
       <div class="card-title">データ確認</div>
       <div class="card-desc">ロード済みデータの件数・最終更新日を一覧で確認</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/search.html">
       <div class="card-icon purple">🔍</div>
       <div class="card-title">レース検索</div>
       <div class="card-desc">日付・競馬場でレースを検索し、出馬表・成績を確認</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/analyze.html">
       <div class="card-icon orange">📈</div>
       <div class="card-title">回収率分析</div>
       <div class="card-desc">条件・指数で馬を絞り込み、勝率・単複回収率を集計キーごとに分析</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/jockey.html">
       <div class="card-icon" style="background:#e8d5ff;font-size:1.5rem">🏇</div>
       <div class="card-title">騎手能力</div>
       <div class="card-desc">競馬場・距離・オッズ帯ごとの回収率をPowerProスタイルで可視化</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/person.html">
       <div class="card-icon" style="background:#fce7f3;font-size:1.5rem">👤</div>
       <div class="card-title">人物分析</div>
       <div class="card-desc">騎手・調教師のコンビ相性・情報印別・オッズ帯別の回収率を分析</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
     <a class="card" href="/course.html">
       <div class="card-icon" style="background:#fef3c7;font-size:1.5rem">📊</div>
       <div class="card-title">コース別傾向</div>
       <div class="card-desc">コースごとの先行/末脚バランス・脚質・指数・オッズ帯の有効性を分析</div>
-      <span class="card-badge">利用可能</span>
+
     </a>
 
   </div>
 </main>
 
+<script src="/nav.js"></script>
 </body>
 </html>
