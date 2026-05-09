@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import path from 'path';
 import { runPipeline, PrefixName } from './pipeline';
 import { createConnection } from './db/dbConnection';
@@ -221,7 +221,7 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
               k.kyusha_index,
               k.kishu_name, k.trainer_name,
               k.kishu_code, k.trainer_code,
-              k.ten_index_juni, k.agari_index_juni, k.blinker,
+              k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
               k.chokyo_yajirushi,
               k.nyukyu_nichi_mae,
               k.hohbokusaki_rank,
@@ -230,9 +230,11 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
               c.chokyo_ryo_hyoka,
               c.course_saka,
               c.isshuumae_oi_index,
-              cr.win_recovery  AS combo_win_rr,
+              cr.win_recovery   AS combo_win_rr,
               cr.place_recovery AS combo_place_rr,
-              cr.total_count   AS combo_n,
+              cr.total_count    AS combo_n,
+              kya.anaba_place_rr  AS kyusha_anaba_place_rr,
+              kya.anaba_n         AS kyusha_anaba_n,
               s.order_of_finish AS result_order,
               s.win             AS result_win,
               s.place           AS result_place,
@@ -245,6 +247,15 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        LEFT JOIN T_COMBO_RECOVERY cr
          ON  cr.kishu_code   = k.kishu_code
          AND cr.trainer_code = k.trainer_code
+       LEFT JOIN (
+         SELECT trainer_code,
+                ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
+                SUM(total_count)                                    AS anaba_n
+         FROM T_KYUSHA_FACTOR_AGG
+         WHERE factor_type = 'kyusha_idx_x_odds'
+           AND factor_value = 'plus_15~'
+         GROUP BY trainer_code
+       ) kya ON kya.trainer_code = TRIM(k.trainer_code)
        LEFT JOIN T_SED s
          ON  s.course_code = k.course_code AND s.year_code = k.year_code
          AND s.kai = k.kai AND s.day_code = k.day_code
@@ -429,6 +440,7 @@ app.post('/api/analyze', async (req, res) => {
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
 // 名前サジェスト: GET /api/suggest?type=kishu|trainer|umanushi&q=<前方一致>
 app.get('/api/suggest', async (req, res) => {
   const { type, q } = req.query as { type?: string; q?: string };
@@ -457,6 +469,7 @@ app.get('/api/suggest', async (req, res) => {
     res.json(rows.map((r: any) => r.name));
   } finally { await conn.end(); }
 });
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // コース別傾向API
@@ -513,212 +526,6 @@ app.get('/api/course-analysis', async (req, res) => {
       result[row.factor_type].push(row);
     }
     res.json({ course_code, tds_code, distance: distance.trim(), factors: result });
-  } finally { await conn.end(); }
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// 人物分析API（騎手/調教師 × ファクター）
-// ────────────────────────────────────────────────────────────────────────────
-
-// 人物一覧: GET /api/persons?type=jockey|trainer
-app.get('/api/persons', async (req, res) => {
-  const { type } = req.query as { type?: string };
-  const isTrainer = type === 'trainer';
-  const codeCol = isTrainer ? 'trainer_code' : 'kishu_code';
-  const nameCol = isTrainer ? 'trainer_name' : 'kishu_name';
-  const conn = await createConnection();
-  try {
-    // T_COMBO_RECOVERYの名前フィールドを直接使用（T_KYI JOIN不要）
-    const [rows] = await conn.query<any>(
-      `SELECT ${codeCol} AS code, MIN(TRIM(${nameCol})) AS name,
-              SUM(total_count) AS n,
-              ROUND(SUM(win_count)/SUM(total_count)*100,1) AS win_rate,
-              ROUND(SUM(win_payout_sum)/SUM(total_count),1) AS win_rr,
-              ROUND(SUM(place_payout_sum)/SUM(total_count),1) AS place_rr
-       FROM T_COMBO_RECOVERY
-       WHERE ${codeCol} IS NOT NULL AND TRIM(${codeCol})<>''
-         AND ${nameCol} IS NOT NULL AND TRIM(${nameCol})<>''
-       GROUP BY ${codeCol}
-       HAVING n >= 50
-       ORDER BY name LIMIT 500`
-    );
-    res.json(rows);
-  } finally { await conn.end(); }
-});
-
-// 人物詳細分析: GET /api/persons/:type/:code
-app.get('/api/persons/:type/:code', async (req, res) => {
-  const { type, code } = req.params;
-  const isTrainer = type === 'trainer';
-  const selfCol    = isTrainer ? 'trainer_code' : 'kishu_code';
-  const selfName   = isTrainer ? 'trainer_name' : 'kishu_name';
-  const partnerCol = isTrainer ? 'kishu_code'   : 'trainer_code';
-  const partnerName= isTrainer ? 'kishu_name'   : 'trainer_name';
-
-  const sedJoin = `
-    INNER JOIN T_BAC b ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
-    INNER JOIN T_SED s ON s.course_code=k.course_code AND s.year_code=k.year_code AND s.kai=k.kai AND s.day_code=k.day_code AND s.race_num=k.race_num AND s.umaban=k.uma_num
-    WHERE b.tds_code IN ('1','2') AND b.class<>'A1' AND s.ijou_kubun IN ('0','')`;
-
-  const qry = (sql: string, params: any[]) =>
-    createConnection().then(c => c.query<any>(sql, params).then(([r]) => r).finally(() => c.end()));
-
-  try {
-    const coreQueries = Promise.all([
-      qry(`SELECT SUM(total_count) AS n,
-              ROUND(SUM(win_count)/SUM(total_count)*100,1) AS win_rate,
-              ROUND(SUM(place_count)/SUM(total_count)*100,1) AS place_rate,
-              ROUND(SUM(win_payout_sum)/SUM(total_count),1) AS win_rr,
-              ROUND(SUM(place_payout_sum)/SUM(total_count),1) AS place_rr
-           FROM T_COMBO_RECOVERY WHERE ${selfCol}=?`, [code]),
-
-      qry(`SELECT cr.${partnerCol} AS partner_code,
-              MIN(TRIM(cr.${partnerName})) AS partner_name,
-              SUM(cr.total_count) AS n,
-              ROUND(SUM(cr.win_count)/SUM(cr.total_count)*100,1) AS win_rate,
-              ROUND(SUM(cr.place_count)/SUM(cr.total_count)*100,1) AS place_rate,
-              ROUND(SUM(cr.win_payout_sum)/SUM(cr.total_count),1) AS win_rr,
-              ROUND(SUM(cr.place_payout_sum)/SUM(cr.total_count),1) AS place_rr
-           FROM T_COMBO_RECOVERY cr
-           WHERE cr.${selfCol}=? AND cr.${partnerCol} IS NOT NULL
-           GROUP BY cr.${partnerCol}
-           HAVING n >= 10
-           ORDER BY win_rr DESC LIMIT 20`, [code]),
-
-      qry(`SELECT TRIM(k.in_joho) AS joho, COUNT(*) AS n,
-              ROUND(SUM(s.order_of_finish+0=1)/COUNT(*)*100,1) AS win_rate,
-              ROUND(COALESCE(SUM(s.win+0),0)/COUNT(*),1) AS win_rr,
-              ROUND(COALESCE(SUM(s.place+0),0)/COUNT(*),1) AS place_rr
-           FROM T_KYI k ${sedJoin}
-             AND k.${selfCol}=? AND TRIM(k.in_joho) BETWEEN '1' AND '5'
-           GROUP BY TRIM(k.in_joho) ORDER BY TRIM(k.in_joho)`, [code]),
-
-      qry(`SELECT
-             CASE WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1))<4 THEN '~4倍'
-                  WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1))<8 THEN '4~8倍'
-                  WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1))<15 THEN '8~15倍'
-                  WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1))<30 THEN '15~30倍'
-                  ELSE '30倍以上' END AS odds_band,
-             COUNT(*) AS n,
-             ROUND(SUM(s.order_of_finish+0=1)/COUNT(*)*100,1) AS win_rate,
-             ROUND(COALESCE(SUM(s.win+0),0)/COUNT(*),1) AS win_rr,
-             ROUND(COALESCE(SUM(s.place+0),0)/COUNT(*),1) AS place_rr
-           FROM T_KYI k ${sedJoin}
-             AND k.${selfCol}=? AND TRIM(k.kijun_odds)<>'' AND CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1))>0
-           GROUP BY odds_band
-           ORDER BY MIN(CAST(TRIM(k.kijun_odds) AS DECIMAL(7,1)))`, [code]),
-
-      qry(`SELECT MIN(TRIM(${selfName})) AS name FROM T_COMBO_RECOVERY WHERE ${selfCol}=?`, [code]),
-    ]);
-
-    const kyushaQuery = isTrainer
-      ? qry(`SELECT
-               CASE WHEN k.kyusha_index+0 < -10 THEN '-20~-10'
-                    WHEN k.kyusha_index+0 <   0 THEN '-10~0'
-                    WHEN k.kyusha_index+0 <  10 THEN '0~10'
-                    WHEN k.kyusha_index+0 <  20 THEN '10~20'
-                    WHEN k.kyusha_index+0 <= 40 THEN '20~40'
-                    ELSE '40~' END AS kyusha_band,
-               COUNT(*) AS n,
-               ROUND(SUM(s.order_of_finish+0=1)/COUNT(*)*100,1) AS win_rate,
-               ROUND(COALESCE(SUM(s.win+0),0)/COUNT(*),1) AS win_rr,
-               ROUND(COALESCE(SUM(s.place+0),0)/COUNT(*),1) AS place_rr
-             FROM T_KYI k ${sedJoin}
-               AND k.${selfCol}=? AND TRIM(k.kyusha_index)<>''
-             GROUP BY kyusha_band
-             ORDER BY MIN(k.kyusha_index+0)`, [code])
-      : Promise.resolve([]);
-
-    const [[baselineRows, combos, byJoho, byOdds, selfInfoRows], byKyusha] =
-      await Promise.all([coreQueries, kyushaQuery]);
-
-    res.json({
-      code, type,
-      name: selfInfoRows[0]?.name || '',
-      baseline: baselineRows[0],
-      combos,
-      by_joho: byJoho,
-      by_odds: byOdds,
-      by_kyusha: byKyusha,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// 騎手能力API
-// ────────────────────────────────────────────────────────────────────────────
-
-// 騎手一覧/検索: GET /api/jockeys?q=<name>
-// q 省略時は全件（最大500件）を返す
-app.get('/api/jockeys', async (req, res) => {
-  const { q } = req.query as { q?: string };
-  const hasFilter = q && q.trim().length > 0;
-  const conn = await createConnection();
-  try {
-    const [rows] = await conn.query<any>(
-      `SELECT DISTINCT kishu_name, kishu_code
-       FROM T_KISHU_FACTOR_AGG
-       WHERE factor_type = 'tds'
-         ${hasFilter ? 'AND kishu_name LIKE ?' : ''}
-       ORDER BY kishu_name
-       LIMIT 500`,
-      hasFilter ? [`%${q!.trim()}%`] : []
-    );
-    res.json(rows);
-  } finally { await conn.end(); }
-});
-
-// 騎手能力データ: GET /api/jockeys/:kishuName/ability?year=YYYY
-app.get('/api/jockeys/:kishuName/ability', async (req, res) => {
-  const kishuName = decodeURIComponent(req.params.kishuName);
-  const { year } = req.query as { year?: string };
-  const conn = await createConnection();
-  try {
-    const [years] = await conn.query<any>(
-      `SELECT DISTINCT SUBSTRING(ymd,1,4) AS yr
-       FROM T_KISHU_RACE_LOG WHERE kishu_name = ?
-       ORDER BY yr DESC`,
-      [kishuName]
-    );
-    if (years.length === 0) { res.status(404).json({ error: '騎手データが見つかりません' }); return; }
-
-    const targetYear = (year && years.some((r: any) => r.yr === year)) ? year : years[0].yr;
-
-    const [[overall]] = await conn.query<any>(
-      `SELECT COUNT(*) AS total_count,
-              SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)            AS win_count,
-              SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) AS place_count,
-              ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)            / COUNT(*) * 100, 1) AS win_rate,
-              ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1) AS place_rate,
-              ROUND(SUM(win_payout)   / COUNT(*), 1) AS win_recovery,
-              ROUND(SUM(place_payout) / COUNT(*), 1) AS place_recovery
-       FROM T_KISHU_RACE_LOG
-       WHERE kishu_name = ? AND SUBSTRING(ymd,1,4) = ?
-         AND finish_order IS NOT NULL AND ijou_kubun IN ('0','')`,
-      [kishuName, targetYear]
-    );
-
-    const [factors] = await conn.query<any>(
-      `SELECT factor_type, factor_value, total_count,
-              win_count, place_count, win_payout_sum, place_payout_sum,
-              win_rate, place_rate, win_recovery, place_recovery,
-              kishu_code
-       FROM T_KISHU_FACTOR_AGG
-       WHERE kishu_name = ? AND agg_year = ?
-       ORDER BY factor_type, total_count DESC`,
-      [kishuName, targetYear]
-    );
-
-    res.json({
-      kishu_name: kishuName,
-      kishu_code: factors[0]?.kishu_code || '',
-      agg_year: targetYear,
-      available_years: years.map((r: any) => r.yr),
-      overall: overall || null,
-      factors,
-    });
   } finally { await conn.end(); }
 });
 

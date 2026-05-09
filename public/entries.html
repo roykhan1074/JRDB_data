@@ -104,10 +104,11 @@
     }
     .race-rnum { font-size: 1.6rem; font-weight: 800; color: #1a1a2e; line-height: 1; min-width: 50px; }
     .race-main { flex: 1; }
-    .race-name { font-size: 1rem; font-weight: 700; margin-bottom: 3px; }
-    .race-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: .78rem; color: #666; }
+    .race-name { display: flex; align-items: center; gap: 6px; font-size: 1.25rem; font-weight: 700; margin-bottom: 7px; }
+    .race-meta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: .95rem; color: #666; }
+    .race-meta > span { display: inline-flex; align-items: center; gap: 4px; }
 
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: .7rem; font-weight: 700; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 1rem; font-weight: 700; }
     .badge-shiba  { background: #dcfce7; color: #15803d; }
     .badge-dirt   { background: #ffedd5; color: #c2410c; }
     .badge-hurdle { background: #ede9fe; color: #6d28d9; }
@@ -191,12 +192,13 @@
     .stable-good { color: #dc2626; font-weight: 600; }
     .stable-bad  { color: #7c3aed; font-weight: 600; }
     /* 回収率カラー（分析ページ共通） */
-    .rr-fire   { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
+    .rr-fire   { background:#fca5a5; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
     .rr-100up  { color:#dc2626; font-weight:700; }
     .rr-90up   { color:#db2777; }
     .rr-80up   { color:#d97706; }
     .rr-low    { color:#9ca3af; }
     .combo-n   { color:#9ca3af; font-size:.72rem; }
+
     /* 着順・払戻 */
     .result-1st  { color:#dc2626; font-weight:700; }
     .result-2nd  { color:#2563eb; font-weight:700; }
@@ -204,12 +206,13 @@
     .result-pay  { font-size:.78rem; color:#374151; }
     .result-ijou { color:#9ca3af; font-size:.72rem; }
     /* 調教SP */
-    .sp-a { background:#fee2e2; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 6px; }
-    .sp-b { background:#fef9c3; color:#92400e; font-weight:600; border-radius:3px; padding:1px 6px; }
+    .sp-a { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 6px; }
+    .sp-b { background:#fef08a; color:#92400e; font-weight:600; border-radius:3px; padding:1px 6px; }
     .sp-c { color:#9ca3af; }
-    .sp-d { background:#eff6ff; color:#1e40af; border-radius:3px; padding:1px 6px; }
+    .sp-d { background:#dbeafe; color:#1e40af; border-radius:3px; padding:1px 6px; }
     .sp-e { background:#1f2937; color:#f9fafb; font-weight:700; border-radius:3px; padding:1px 6px; }
-    .stable-yellow { background: #fef08a; }
+    .stable-yellow { background: #fde047; }
+    .stable-pink   { background: #fbcfe8; }
 
     .horse-name { font-weight: 600; }
 
@@ -595,10 +598,8 @@
           <div class="rh-info">
             <div class="race-rnum">${rnum}R</div>
             <div class="race-main">
-              <div class="race-name">${name}${badgeText?`<span class="badge badge-g1" style="vertical-align:middle;margin-left:6px">${badgeText}</span>`:''}</div>
+              <div class="race-name">${name}${badgeText?`<span class="badge badge-g1">${badgeText}</span>`:''}</div>
               <div class="race-meta">
-                <span>📅 ${fmtDate(race.ymd)}</span>
-                <span>🏟 ${course}</span>
                 <span>⏰ ${fmtTime(race.start_time)} 発走</span>
                 <span>${tds?`<span class="badge ${tdsBadge}">${tds}</span>`:''} ${dir}${dist}</span>
                 <span>🐎 ${heads}</span>
@@ -666,8 +667,8 @@
       }
       function rankCellBg(raw) {
         const v = parseInt(String(raw ?? '').trim());
-        if (v === 1)       return ' style="background:#fce7f3"';
-        if (v >= 2 && v <= 3) return ' style="background:#dcfce7"';
+        if (v === 1)       return ' style="background:#fbcfe8"';
+        if (v >= 2 && v <= 3) return ' style="background:#bbf7d0"';
         return '';
       }
       function rankNumCell(raw) {
@@ -691,8 +692,8 @@
 
       // 印セル背景色（他列と同様: ◎=ピンク, ○▲=緑）
       function markRankBg(rank) {
-        if (rank === 1)                return ' style="background:#fce7f3"';
-        if (rank === 2 || rank === 3)  return ' style="background:#dcfce7"';
+        if (rank === 1)                return ' style="background:#fbcfe8"';
+        if (rank === 2 || rank === 3)  return ' style="background:#bbf7d0"';
         return '';
       }
       const infoBg = infoGray ? '' : markRankBg(infoRanks[i]);
@@ -716,6 +717,16 @@
 
       // 厩舎指数セル黄色条件: 基準オッズ≧15 かつ 厩舎指数≧0
       const stableYellow = !isNaN(oddsV) && oddsV >= 15 && !isNaN(stableV) && stableV >= 0;
+
+      // 厩舎指数ピンク条件: 基準オッズ≧15 かつ 厩舎指数≧0 かつ 同条件(オッズ≧15×指数≧0)での複回収率≧100%
+      const anabaPlaceRr = parseFloat(String(r.kyusha_anaba_place_rr ?? ''));
+      const anabaN       = parseInt(String(r.kyusha_anaba_n ?? ''));
+      const trainerYellow = !isNaN(oddsV) && oddsV >= 15
+                         && !isNaN(stableV) && stableV >= 0
+                         && !isNaN(anabaPlaceRr) && anabaPlaceRr >= 100;
+      const trainerTip = trainerYellow
+        ? `穴信頼度(複回収): ${anabaPlaceRr}%（${anabaN}件）`
+        : '';
 
       function trainingIdxHtml(raw) {
         const v = parseInt(String(raw ?? '').trim());
@@ -743,12 +754,19 @@
         <td class="left horse-name">${r.uma_name?.trim() || '—'}</td>
         <td>${blinkerHtml}</td>
         <td><span class="kyaku">${kyaku}</span></td>
-        <td class="group-sep"${oddsRank === 1 ? ' style="background:#fce7f3"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#dcfce7"' : ''}>${oddsDisp}</td>
+        <td class="group-sep"${oddsRank === 1 ? ' style="background:#fbcfe8"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#bbf7d0"' : ''}>${oddsDisp}</td>
         <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
-        <td class="left">${r.trainer_name?.trim() || '—'}</td>
-        <td class="group-sep" title="${r.combo_n != null ? String(r.combo_n) : ''}">${(()=>{
-          const rr = r.combo_place_rr;
-          if (rr == null) return '<span class="rr-low">—</span>';
+        <td class="left"${trainerTip ? ` data-tip="${trainerTip}"` : ''}>${r.trainer_name?.trim() || '—'}</td>
+        <td class="group-sep"${(()=>{
+          const n   = r.combo_n;
+          const wrr = parseFloat(r.combo_win_rr);
+          const prr = parseFloat(r.combo_place_rr);
+          if (n == null) return '';
+          const tip = `騎×厩コンビ ${n}件 ／ 単回${isNaN(wrr)?'—':wrr+'%'} 複回${isNaN(prr)?'—':prr+'%'}`;
+          return ` data-tip="${tip}"`;
+        })()}>${(()=>{
+          const rr = parseFloat(r.combo_place_rr);
+          if (isNaN(rr)) return '<span class="rr-low">—</span>';
           if (rr >= 100) return '<span class="rr-fire">A</span>';
           if (rr >=  90) return '<span class="rr-90up">B</span>';
           if (rr >=  80) return '<span class="rr-80up">C</span>';
@@ -760,7 +778,7 @@
         <td class="group-sep mark-col${idmGray ? ' cell-gray' : ''}">${idmMark}</td><td class="idx-col${idmGray ? ' cell-gray' : ''}">${idmIdxCell}</td>
         <td class="group-sep rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
         <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
-        <td class="group-sep${stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
+        <td class="group-sep${trainerYellow ? ' stable-pink' : stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
         <td class="group-sep">${(()=>{
           const g = spGrades[i];
           if (!g) return '<span class="sp-c">—</span>';
