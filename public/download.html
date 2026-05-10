@@ -157,6 +157,26 @@
   <div class="card" style="padding:0; overflow:hidden;">
     <div class="log-area" id="log-area">（ログがここに表示されます）</div>
   </div>
+
+  <!-- 穴馬指数ETL -->
+  <h1 style="margin-top:32px">穴馬指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.88rem;color:#555;margin-bottom:16px;line-height:1.7">
+      DBに蓄積されたデータ（T_KYI / T_BAC / T_SED / T_CYB / T_UKC）から<br>
+      穴馬ファクト・ファクター集計・指数スコアを再計算します。<br>
+      <span style="color:#d97706;font-weight:600">⚠ 指数計算（Part 4）は3〜5分かかります。</span>
+    </p>
+    <button class="btn-run" id="btn-anaba" style="max-width:280px">穴馬指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="anaba-status-bar">
+    <div class="spinner" id="anaba-spinner"></div>
+    <span id="anaba-status-text"></span>
+  </div>
+
+  <div class="card" id="anaba-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="anaba-log-area"></div>
+  </div>
 </div>
 
 <script>
@@ -340,6 +360,76 @@
       }
     } finally {
       finalize();
+    }
+  });
+
+  // ── 穴馬指数 ETL ──────────────────────────────────────
+  const anabaLog   = document.getElementById('anaba-log-area');
+  const anabaCard  = document.getElementById('anaba-log-card');
+  const anabaBar   = document.getElementById('anaba-status-bar');
+  const anabaSpin  = document.getElementById('anaba-spinner');
+  const anabaText  = document.getElementById('anaba-status-text');
+  const anabaBtn   = document.getElementById('btn-anaba');
+
+  function anabaAppend(msg, cls) {
+    if (!anabaCard.style.display || anabaCard.style.display === 'none') anabaCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    anabaLog.appendChild(line);
+    anabaLog.scrollTop = anabaLog.scrollHeight;
+  }
+
+  function anabaStatus(state, text) {
+    anabaBar.className = 'status-bar ' + state;
+    anabaText.textContent = text;
+    anabaSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  anabaBtn.addEventListener('click', async () => {
+    anabaBtn.disabled = true;
+    anabaLog.textContent = '';
+    anabaCard.style.display = '';
+    anabaStatus('running', '穴馬指数を更新中...');
+    anabaAppend('穴馬指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/anaba-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.startsWith('[Part4]') && payload.message.includes('中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            anabaAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              anabaStatus('error', 'エラーが発生しました');
+            } else {
+              anabaStatus('done', '穴馬指数の更新が完了しました');
+              anabaAppend('[完了] 出馬表を再読み込みすると新しい指数が表示されます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      anabaStatus('error', 'エラー: ' + err.message);
+      anabaAppend('エラー: ' + err.message, 'error');
+    } finally {
+      anabaBtn.disabled = false;
     }
   });
 </script>

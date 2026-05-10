@@ -1,7 +1,61 @@
 ﻿import express from 'express';
 import path from 'path';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
 import { runPipeline, PrefixName } from './pipeline';
 import { createConnection } from './db/dbConnection';
+
+const ANABA_SQL_FILE = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
+
+const PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクトデータ投入 (T_ANABA_RACE_LOG)',
+  3: 'ファクター集計 (T_ANABA_FACTOR_AGG)',
+  4: '指数計算 (T_ANABA_SCORE)',
+};
+
+/** SQLファイルを -- Part N: マーカーで4パートに分割 */
+function splitAnabaSql(content: string): string[] {
+  const parts: string[] = [];
+  const markers = ['-- Part 2:', '-- Part 3:', '-- Part 4:'];
+  let remaining = content;
+  for (const marker of markers) {
+    const markerIdx = remaining.indexOf(marker);
+    if (markerIdx === -1) { parts.push(remaining); remaining = ''; break; }
+    const beforeMarker = remaining.slice(0, markerIdx);
+    const splitPoint = Math.max(0, beforeMarker.lastIndexOf('\n-- ====='));
+    parts.push(remaining.slice(0, splitPoint));
+    remaining = remaining.slice(splitPoint);
+  }
+  if (remaining.trim()) parts.push(remaining);
+  return parts.filter(p => p.trim().length > 0);
+}
+
+/** mysql CLI にSQLを渡して実行。エラー時は reject。 */
+function runMysqlSql(sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-h', process.env.DB_HOST ?? 'localhost',
+      '-P', String(process.env.DB_PORT ?? '3306'),
+      '-u', process.env.DB_USER ?? 'root',
+      `-p${process.env.DB_PASS ?? ''}`,
+      '--batch',
+      process.env.DB_NAME ?? 'racing',
+    ];
+    const proc = spawn('mysql', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d: Buffer) => {
+      const s = d.toString();
+      if (!s.includes('[Warning] Using a password')) stderr += s;
+    });
+    proc.on('close', (code: number | null) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `mysql exit code ${code}`));
+    });
+    proc.stdin.write(sql, 'utf8');
+    proc.stdin.end();
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -235,6 +289,11 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
               cr.total_count    AS combo_n,
               kya.anaba_place_rr  AS kyusha_anaba_place_rr,
               kya.anaba_n         AS kyusha_anaba_n,
+              ans.overall_score AS anaba_overall_score,
+              ans.course_score  AS anaba_course_score,
+              ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
+              ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
+              ans.score_chokyo, ans.score_joshodo, ans.score_tekisei, ans.score_blood,
               s.order_of_finish AS result_order,
               s.win             AS result_win,
               s.place           AS result_place,
@@ -256,6 +315,10 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
            AND factor_value = 'plus_15~'
          GROUP BY trainer_code
        ) kya ON kya.trainer_code = TRIM(k.trainer_code)
+       LEFT JOIN T_ANABA_SCORE ans
+         ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
+         AND ans.kai = k.kai AND ans.day_code = k.day_code
+         AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
        LEFT JOIN T_SED s
          ON  s.course_code = k.course_code AND s.year_code = k.year_code
          AND s.kai = k.kai AND s.day_code = k.day_code
@@ -527,6 +590,71 @@ app.get('/api/course-analysis', async (req, res) => {
     }
     res.json({ course_code, tds_code, distance: distance.trim(), factors: result });
   } finally { await conn.end(); }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 穴馬指数 ETL: POST /api/anaba-etl
+// anaba_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/anaba-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  (async () => {
+    if (!fs.existsSync(ANABA_SQL_FILE)) {
+      send('エラー: sql/anaba_index.sql が見つかりません', { error: true, done: true });
+      res.end(); return;
+    }
+    const sql = fs.readFileSync(ANABA_SQL_FILE, 'utf-8');
+    const parts = splitAnabaSql(sql);
+
+    for (let i = 0; i < parts.length; i++) {
+      const partNum = i + 1;
+      const label = PART_LABELS[partNum] ?? `Part${partNum}`;
+      send(`[Part${partNum}] ${label} 開始...`);
+
+      // Part 4 (指数計算) は長時間かかるためハートビートを定期送信
+      let heartbeat: NodeJS.Timeout | undefined;
+      if (partNum === 4) {
+        let elapsed = 0;
+        heartbeat = setInterval(() => {
+          elapsed += 15;
+          send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
+        }, 15_000);
+      }
+
+      try {
+        await runMysqlSql(parts[i]);
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] ${label} 完了`);
+      } catch (err: any) {
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        res.end(); return;
+      }
+    }
+
+    // 件数確認
+    try {
+      const conn = await createConnection();
+      const [[row]] = await conn.query<any>(
+        'SELECT COUNT(*) AS cnt FROM T_ANABA_SCORE'
+      );
+      await conn.end();
+      send(`完了: T_ANABA_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+    } catch { /* 無視 */ }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
 });
 
 app.listen(PORT, () => {

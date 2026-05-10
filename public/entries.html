@@ -231,6 +231,14 @@
     /* 調教スコア数値 */
     .ts-num { font-size: .7rem; color: #666; margin-left: 3px; }
 
+    /* 穴馬指数 */
+    .anaba-s { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
+    .anaba-a { color:#dc2626; font-weight:700; }
+    .anaba-b { color:#d97706; font-weight:600; }
+    .anaba-c { color:#374151; }
+    .anaba-d { color:#9ca3af; }
+    .anaba-na { color:#d1d5db; font-size:.72rem; }
+
     /* 重点買い行ハイライト: 中穴(10~49倍) × スコア≥70 */
     tbody tr.chukiten { background: #f0fdf4 !important; }
     tbody tr.chukiten:hover { background: #bbf7d0 !important; }
@@ -301,6 +309,8 @@
           <th rowspan="2" class="rank-col" style="width:58px">後3F</th>
           <th rowspan="2" class="group-sep">厩舎指数</th>
           <th rowspan="2" class="group-sep">調教SP</th>
+          <th rowspan="2" class="group-sep" title="穴馬指数（全体）&#10;kijun_odds≥10倍の馬のみ表示&#10;各ファクター回収率偏差の合計">穴指数<br><small style="font-size:.65rem;font-weight:400">全体</small></th>
+          <th rowspan="2" title="穴馬指数（コース別）&#10;場×芝ダ×距離帯の補正あり">穴指数<br><small style="font-size:.65rem;font-weight:400">コース</small></th>
           <th rowspan="2" class="group-sep">着順</th>
           <th rowspan="2">単勝</th>
           <th rowspan="2">複勝</th>
@@ -745,6 +755,46 @@
           + `<span class="ts-num">${ts.score}</span>`
           + `</span>`;
 
+      // 穴馬指数セル（kijun_odds >= 10.0 の馬のみ有効値を表示）
+      const isAnaba = !isNaN(oddsV) && oddsV >= 10.0;
+      function anabaScoreHtml(raw, tip) {
+        if (!isAnaba) return '<span class="anaba-na">—</span>';
+        const v = parseFloat(raw);
+        if (isNaN(v)) return '<span class="anaba-na">—</span>';
+        const cls = v >= 100 ? 'anaba-s' : v >= 50 ? 'anaba-a' : v >= 10 ? 'anaba-b' : v >= -10 ? 'anaba-c' : 'anaba-d';
+        return `<span class="${cls}"${tip ? ` data-tip="${tip}"` : ''}>${Math.round(v)}</span>`;
+      }
+
+      // ツールチップ（内訳）
+      const anabaOverallScore = parseFloat(String(r.anaba_overall_score ?? ''));
+      const anabaCourseScore  = parseFloat(String(r.anaba_course_score  ?? ''));
+      function anabaBreakdown() {
+        if (!isAnaba) return '';
+        const parts = [
+          ['テン',   r.score_ten],
+          ['上がり', r.score_agari],
+          ['位置',   r.score_ichi],
+          ['ゴール', r.score_goal],
+          ['展開複合',r.score_combo],
+          ['IDM',    r.score_idm],
+          ['激走',   r.score_gekiso],
+          ['万券',   r.score_manbaken],
+          ['調教',   r.score_chokyo],
+          ['脚質',   r.score_kyakushitsu],
+          ['上昇度', r.score_joshodo],
+          ['適性',   r.score_tekisei],
+          ['血統',   r.score_blood],
+        ].filter(([, v]) => v != null && !isNaN(parseFloat(v)))
+         .map(([k, v]) => {
+           const n = parseFloat(v);
+           return `${k}:${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
+         });
+        return '穴馬指数内訳\\n' + parts.join(' / ');
+      }
+      const anabaTip = anabaBreakdown().replace(/"/g, '&quot;');
+      const anabaOverallHtml = anabaScoreHtml(anabaOverallScore, anabaTip);
+      const anabaCourseHtml  = anabaScoreHtml(anabaCourseScore,  anabaTip);
+
       // 重点買いハイライト: オッズ10〜49倍 × スコア≥70 (Item4)
       const isChukiten = !isNaN(oddsV) && oddsV >= 10 && oddsV < 50 && ts.score >= 70;
 
@@ -784,6 +834,8 @@
           if (!g) return '<span class="sp-c">—</span>';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
+        <td class="group-sep" style="min-width:38px">${anabaOverallHtml}</td>
+        <td style="min-width:38px">${anabaCourseHtml}</td>
         <td class="group-sep">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
           if (ijou === '1') return '<span class="result-ijou">取消</span>';

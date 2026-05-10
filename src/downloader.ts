@@ -94,17 +94,33 @@ async function downloadOne(
   const txtPath = path.join(TEXT_DIR, upper, `${upper}${ymd6}.txt`);
 
   if (fs.existsSync(zipPath) && fs.existsSync(txtPath)) {
-    return { date: ymd, dir, status: 'skip', message: 'already exists' };
+    // ZIP の更新日（ダウンロード日）とレース日を比較
+    // レース日より前にダウンロードしたファイル = 先行配信版の可能性あり → 再取得
+    const raceDate = parseDate(ymd);
+    const zipMtime = fs.statSync(zipPath).mtime;
+    const raceDateOnly = new Date(raceDate.getFullYear(), raceDate.getMonth(), raceDate.getDate());
+    const zipDateOnly  = new Date(zipMtime.getFullYear(), zipMtime.getMonth(), zipMtime.getDate());
+
+    if (zipDateOnly >= raceDateOnly) {
+      // レース当日以降にダウンロード済み → 最終版とみなしスキップ
+      return { date: ymd, dir, status: 'skip', message: 'already exists' };
+    }
+
+    // レース日より前のダウンロード = 先行配信データ → 削除して最新版を再取得
+    fs.unlinkSync(zipPath);
+    fs.unlinkSync(txtPath);
   }
 
+  let reacquired = false;
   try {
     fs.mkdirSync(ZIP_DIR, { recursive: true });
     fs.mkdirSync(TEXT_DIR, { recursive: true });
     if (!fs.existsSync(zipPath)) {
       await downloadFile(url, zipPath, signal);
+      reacquired = true;
     }
     extractTextFiles(zipPath);
-    return { date: ymd, dir, status: 'ok' };
+    return { date: ymd, dir, status: 'ok', message: reacquired ? '先行配信データを再取得' : undefined };
   } catch (err) {
     if ((err as any)?.code === 'ERR_CANCELED' || (err as any)?.name === 'AbortError') {
       throw err; // キャンセルは上位に伝播
