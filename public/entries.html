@@ -123,12 +123,13 @@
       width: 100%; border-collapse: collapse;
       background: #fff; border-radius: 8px; overflow: hidden;
       box-shadow: 0 1px 4px rgba(0,0,0,.08);
-      white-space: nowrap;
+      table-layout: fixed;
     }
     thead tr { background: #1a1a2e; color: #fff; }
     thead th {
       padding: 6px 7px; font-size: .72rem; font-weight: 600;
       text-align: center; letter-spacing: .03em;
+      white-space: normal; overflow: hidden; word-break: break-all;
     }
     thead th.left { text-align: left; }
     thead .group-sep { border-left: 1px solid #374151; }
@@ -139,6 +140,7 @@
     tbody td {
       padding: 3px 7px; font-size: .83rem;
       text-align: center; vertical-align: middle; line-height: 1.4;
+      white-space: nowrap; overflow: hidden;
     }
     tbody td.left { text-align: left; }
     tbody td.group-sep { border-left: 1px solid #f0f0f0; }
@@ -149,10 +151,10 @@
     /* 調教指数（追切・仕上）*/
     .training-good { color: #dc2626; font-weight: 600; }
     .training-bad  { color: #7c3aed; font-weight: 600; }
-    .idx-col  { text-align: center; padding-left: 2px !important; padding-right: 2px !important; width: 34px; }
-    .rank-col { text-align: center; padding-left: 8px !important; padding-right: 8px !important; }
-    .mark-col-w { text-align: center !important; width: 26px; }
-    .mark-col { text-align: center !important; padding-left: 4px !important; padding-right: 0 !important; }
+    .idx-col  { text-align: center; padding-left: 2px !important; padding-right: 2px !important; width: 28px; }
+    .rank-col { text-align: center; padding-left: 4px !important; padding-right: 4px !important; }
+    .mark-col-w { text-align: center !important; width: 20px; }
+    .mark-col { text-align: center !important; padding-left: 4px !important; padding-right: 0 !important; width: 20px; }
 
     /* 枠番カラー（日本競馬公式色） */
     .waku {
@@ -191,13 +193,6 @@
     /* 厩舎指数 */
     .stable-good { color: #dc2626; font-weight: 600; }
     .stable-bad  { color: #7c3aed; font-weight: 600; }
-    /* 回収率カラー（分析ページ共通） */
-    .rr-fire   { background:#fca5a5; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
-    .rr-100up  { color:#dc2626; font-weight:700; }
-    .rr-90up   { color:#db2777; }
-    .rr-80up   { color:#d97706; }
-    .rr-low    { color:#9ca3af; }
-    .combo-n   { color:#9ca3af; font-size:.72rem; }
 
     /* 着順・払戻 */
     .result-1st  { color:#dc2626; font-weight:700; }
@@ -206,11 +201,11 @@
     .result-pay  { font-size:.78rem; color:#374151; }
     .result-ijou { color:#9ca3af; font-size:.72rem; }
     /* 調教SP */
-    .sp-a { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 6px; }
-    .sp-b { background:#fef08a; color:#92400e; font-weight:600; border-radius:3px; padding:1px 6px; }
-    .sp-c { color:#9ca3af; }
-    .sp-d { background:#dbeafe; color:#1e40af; border-radius:3px; padding:1px 6px; }
-    .sp-e { background:#1f2937; color:#f9fafb; font-weight:700; border-radius:3px; padding:1px 6px; }
+    .sp-a { color:#dc2626; font-weight:700; }
+    .sp-b { color:#15803d; font-weight:600; }
+    .sp-c { color:#374151; }
+    .sp-d { color:#374151; }
+    .sp-e { color:#9ca3af; }
     .stable-yellow { background: #fde047; }
     .stable-pink   { background: #fbcfe8; }
 
@@ -232,11 +227,6 @@
     .ts-num { font-size: .7rem; color: #666; margin-left: 3px; }
 
     /* 穴馬指数 */
-    .anaba-s { background:#fecaca; color:#991b1b; font-weight:700; border-radius:3px; padding:1px 5px; }
-    .anaba-a { color:#dc2626; font-weight:700; }
-    .anaba-b { color:#d97706; font-weight:600; }
-    .anaba-c { color:#374151; }
-    .anaba-d { color:#9ca3af; }
     .anaba-na { color:#d1d5db; font-size:.72rem; }
 
     /* 重点買い行ハイライト: 中穴(10~49倍) × スコア≥70 */
@@ -291,10 +281,36 @@
 
   <div class="table-wrap" id="table-wrap" style="display:none">
     <table>
+      <colgroup>
+        <col style="width:28px">  <!-- 枠 -->
+        <col style="width:28px">  <!-- 馬番 -->
+        <col style="width:160px"> <!-- 馬名 -->
+        <col style="width:18px">  <!-- B -->
+        <col style="width:36px">  <!-- 脚質 -->
+        <col style="width:50px">  <!-- オッズ -->
+        <col style="width:76px">  <!-- 騎手 -->
+        <col style="width:76px">  <!-- 厩舎 -->
+        <col style="width:48px">  <!-- 騎×厩 -->
+        <col style="width:20px">  <!-- 情報印 mark -->
+        <col style="width:28px">  <!-- 情報印 idx -->
+        <col style="width:20px">  <!-- 展開印 mark -->
+        <col style="width:28px">  <!-- 展開印 idx -->
+        <col style="width:20px">  <!-- IDM印 mark -->
+        <col style="width:28px">  <!-- IDM印 idx -->
+        <col style="width:48px">  <!-- 前3F -->
+        <col style="width:48px">  <!-- 後3F -->
+        <col style="width:48px">  <!-- 厩舎指数 -->
+        <col style="width:48px">  <!-- 調教SP -->
+        <col style="width:48px">  <!-- 穴指数全体 -->
+        <col style="width:48px">  <!-- 穴指数コース -->
+        <col style="width:34px">  <!-- 着順 -->
+        <col style="width:52px">  <!-- 単勝 -->
+        <col style="width:52px">  <!-- 複勝 -->
+      </colgroup>
       <thead>
         <tr>
           <th rowspan="2">枠</th>
-          <th rowspan="2">馬番</th>
+          <th rowspan="2"></th>
           <th rowspan="2" class="left">馬名</th>
           <th rowspan="2">B</th>
           <th rowspan="2">脚質</th>
@@ -305,9 +321,9 @@
           <th rowspan="2" class="group-sep" colspan="2">情報印</th>
           <th rowspan="2" class="group-sep" colspan="2">展開印</th>
           <th rowspan="2" class="group-sep" colspan="2">IDM印</th>
-          <th rowspan="2" class="group-sep rank-col" style="width:58px">前3F</th>
-          <th rowspan="2" class="rank-col" style="width:58px">後3F</th>
-          <th rowspan="2" class="group-sep">厩舎指数</th>
+          <th rowspan="2" class="group-sep rank-col">前3F</th>
+          <th rowspan="2" class="rank-col">後3F</th>
+          <th rowspan="2" class="group-sep">厩指数</th>
           <th rowspan="2" class="group-sep">調教SP</th>
           <th rowspan="2" class="group-sep" title="穴馬指数（全体）&#10;kijun_odds≥10倍の馬のみ表示&#10;各ファクター回収率偏差の合計">穴指数<br><small style="font-size:.65rem;font-weight:400">全体</small></th>
           <th rowspan="2" title="穴馬指数（コース別）&#10;場×芝ダ×距離帯の補正あり">穴指数<br><small style="font-size:.65rem;font-weight:400">コース</small></th>
@@ -634,6 +650,26 @@
     const idmRanks   = denseRanks(rows, 'idm',           false);  // 高い方が良い
     const goalRanks  = denseRanks(rows, 'goal_juni',     true);   // 低い方が良い（goal_juni自体が順位）
 
+    // 穴馬内順位（kijun_odds >= 10.0 の馬のみ対象、全体・コース別それぞれ降順）
+    const anabaOverallRanks = (() => {
+      const vals = rows.map(r => {
+        const odds = parseFloat(String(r.kijun_odds ?? '').trim());
+        const score = parseFloat(String(r.anaba_overall_score ?? ''));
+        return (odds >= 10.0 && !isNaN(score)) ? score : null;
+      });
+      const sorted = [...new Set(vals.filter(v => v !== null))].sort((a, b) => b - a);
+      return vals.map(v => v === null ? null : sorted.indexOf(v) + 1);
+    })();
+    const anabaCourseRanks = (() => {
+      const vals = rows.map(r => {
+        const odds = parseFloat(String(r.kijun_odds ?? '').trim());
+        const score = parseFloat(String(r.anaba_course_score ?? ''));
+        return (odds >= 10.0 && !isNaN(score)) ? score : null;
+      });
+      const sorted = [...new Set(vals.filter(v => v !== null))].sort((a, b) => b - a);
+      return vals.map(v => v === null ? null : sorted.indexOf(v) + 1);
+    })();
+
     const heads = parseInt(race.heads) || 0;
 
     // IDM 3位の値を取得（グレー判定用）
@@ -755,45 +791,52 @@
           + `<span class="ts-num">${ts.score}</span>`
           + `</span>`;
 
+      // 騎×厩グレード（調教SPと同じ配色を使うため事前計算）
+      const comboRr    = parseFloat(r.combo_place_rr);
+      const comboGrade = isNaN(comboRr) ? null
+        : comboRr >= 100 ? 'A' : comboRr >= 90 ? 'B' : comboRr >= 80 ? 'C' : comboRr >= 65 ? 'D' : 'E';
+      const comboBg    = comboGrade === 'A' ? 'background:#fbcfe8'
+        : comboGrade === 'B' ? 'background:#bbf7d0'
+        : comboGrade === 'E' ? 'background:#e5e7eb' : '';
+
       // 穴馬指数セル（kijun_odds >= 10.0 の馬のみ有効値を表示）
       const isAnaba = !isNaN(oddsV) && oddsV >= 10.0;
-      function anabaScoreHtml(raw, tip) {
-        if (!isAnaba) return '<span class="anaba-na">—</span>';
-        const v = parseFloat(raw);
-        if (isNaN(v)) return '<span class="anaba-na">—</span>';
-        const cls = v >= 100 ? 'anaba-s' : v >= 50 ? 'anaba-a' : v >= 10 ? 'anaba-b' : v >= -10 ? 'anaba-c' : 'anaba-d';
-        return `<span class="${cls}"${tip ? ` data-tip="${tip}"` : ''}>${Math.round(v)}</span>`;
-      }
-
-      // ツールチップ（内訳）
       const anabaOverallScore = parseFloat(String(r.anaba_overall_score ?? ''));
       const anabaCourseScore  = parseFloat(String(r.anaba_course_score  ?? ''));
-      function anabaBreakdown() {
+
+      // ツールチップ内訳
+      const anabaTip = (() => {
         if (!isAnaba) return '';
         const parts = [
-          ['テン',   r.score_ten],
-          ['上がり', r.score_agari],
-          ['位置',   r.score_ichi],
-          ['ゴール', r.score_goal],
+          ['テン',    r.score_ten],
+          ['上がり',  r.score_agari],
+          ['位置',    r.score_ichi],
+          ['ゴール',  r.score_goal],
           ['展開複合',r.score_combo],
-          ['IDM',    r.score_idm],
-          ['激走',   r.score_gekiso],
-          ['万券',   r.score_manbaken],
-          ['調教',   r.score_chokyo],
-          ['脚質',   r.score_kyakushitsu],
-          ['上昇度', r.score_joshodo],
-          ['適性',   r.score_tekisei],
-          ['血統',   r.score_blood],
+          ['IDM',     r.score_idm],
+          ['激走',    r.score_gekiso],
+          ['万券',    r.score_manbaken],
+          ['調教',    r.score_chokyo],
+          ['脚質',    r.score_kyakushitsu],
+          ['上昇度',  r.score_joshodo],
+          ['適性',    r.score_tekisei],
+          ['血統',    r.score_blood],
         ].filter(([, v]) => v != null && !isNaN(parseFloat(v)))
-         .map(([k, v]) => {
-           const n = parseFloat(v);
-           return `${k}:${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
-         });
-        return '穴馬指数内訳\\n' + parts.join(' / ');
+         .map(([k, v]) => { const n = parseFloat(v); return `${k}:${n >= 0 ? '+' : ''}${n.toFixed(1)}`; });
+        return ('穴馬指数内訳\\n' + parts.join(' / ')).replace(/"/g, '&quot;');
+      })();
+
+      // スコアセル生成（他列の rankNumCell と同じ配色ルール）
+      function anabaInner(score, rank, tip) {
+        if (!isAnaba || isNaN(score)) return '<span class="anaba-na">—</span>';
+        // マイナスはグレー固定（ランク配色なし）
+        if (score < 0) return `<span style="color:#9ca3af"${tip ? ` data-tip="${tip}"` : ''}>${Math.round(score)}</span>`;
+        const color  = rank === 1 ? '#dc2626' : (rank === 2 || rank === 3) ? '#15803d' : '#333';
+        const weight = rank === 1 ? '700'     : (rank === 2 || rank === 3) ? '600'     : '400';
+        return `<span style="color:${color};font-weight:${weight}"${tip ? ` data-tip="${tip}"` : ''}>${Math.round(score)}</span>`;
       }
-      const anabaTip = anabaBreakdown().replace(/"/g, '&quot;');
-      const anabaOverallHtml = anabaScoreHtml(anabaOverallScore, anabaTip);
-      const anabaCourseHtml  = anabaScoreHtml(anabaCourseScore,  anabaTip);
+      const anabaOverallHtml = anabaInner(anabaOverallScore, anabaOverallRanks[i], anabaTip);
+      const anabaCourseHtml  = anabaInner(anabaCourseScore,  anabaCourseRanks[i],  anabaTip);
 
       // 重点買いハイライト: オッズ10〜49倍 × スコア≥70 (Item4)
       const isChukiten = !isNaN(oddsV) && oddsV >= 10 && oddsV < 50 && ts.score >= 70;
@@ -807,35 +850,20 @@
         <td class="group-sep"${oddsRank === 1 ? ' style="background:#fbcfe8"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#bbf7d0"' : ''}>${oddsDisp}</td>
         <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
         <td class="left"${trainerTip ? ` data-tip="${trainerTip}"` : ''}>${r.trainer_name?.trim() || '—'}</td>
-        <td class="group-sep"${(()=>{
-          const n   = r.combo_n;
-          const wrr = parseFloat(r.combo_win_rr);
-          const prr = parseFloat(r.combo_place_rr);
-          if (n == null) return '';
-          const tip = `騎×厩コンビ ${n}件 ／ 単回${isNaN(wrr)?'—':wrr+'%'} 複回${isNaN(prr)?'—':prr+'%'}`;
-          return ` data-tip="${tip}"`;
-        })()}>${(()=>{
-          const rr = parseFloat(r.combo_place_rr);
-          if (isNaN(rr)) return '<span class="rr-low">—</span>';
-          if (rr >= 100) return '<span class="rr-fire">A</span>';
-          if (rr >=  90) return '<span class="rr-90up">B</span>';
-          if (rr >=  80) return '<span class="rr-80up">C</span>';
-          if (rr >=  65) return 'D';
-          return '<span class="rr-low">E</span>';
-        })()}</td>
+        <td class="group-sep"${comboBg ? ` style="${comboBg}"` : ''}${r.combo_n != null ? ` data-tip="騎×厩コンビ ${r.combo_n}件 ／ 単回${isNaN(parseFloat(r.combo_win_rr))?'—':parseFloat(r.combo_win_rr)+'%'} 複回${isNaN(comboRr)?'—':comboRr+'%'}"` : ''}>${comboGrade ? `<span class="sp-${comboGrade.toLowerCase()}">${comboGrade}</span>` : '<span class="sp-e">—</span>'}</td>
         <td class="group-sep mark-col${infoGray ? ' cell-gray' : ''}">${infoMark}</td><td class="idx-col${infoGray ? ' cell-gray' : ''}">${infoIdxCell}</td>
         <td class="group-sep mark-col${goalGray ? ' cell-gray' : ''}">${goalMark}</td><td class="idx-col${goalGray ? ' cell-gray' : ''}">${goalIdxCell}</td>
         <td class="group-sep mark-col${idmGray ? ' cell-gray' : ''}">${idmMark}</td><td class="idx-col${idmGray ? ' cell-gray' : ''}">${idmIdxCell}</td>
         <td class="group-sep rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
         <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
         <td class="group-sep${trainerYellow ? ' stable-pink' : stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
-        <td class="group-sep">${(()=>{
+        <td class="group-sep"${(()=>{ const g=spGrades[i]; return g==='A'?' style="background:#fbcfe8"':g==='B'?' style="background:#bbf7d0"':g==='E'?' style="background:#e5e7eb"':''; })()}>${(()=>{
           const g = spGrades[i];
           if (!g) return '<span class="sp-c">—</span>';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
-        <td class="group-sep" style="min-width:38px">${anabaOverallHtml}</td>
-        <td style="min-width:38px">${anabaCourseHtml}</td>
+        <td class="group-sep"${anabaOverallScore>=0&&anabaOverallRanks[i]===1?' style="background:#fbcfe8"':anabaOverallScore>=0&&(anabaOverallRanks[i]===2||anabaOverallRanks[i]===3)?' style="background:#bbf7d0"':''}>${anabaOverallHtml}</td>
+        <td${anabaCourseScore>=0&&anabaCourseRanks[i]===1?' style="background:#fbcfe8"':anabaCourseScore>=0&&(anabaCourseRanks[i]===2||anabaCourseRanks[i]===3)?' style="background:#bbf7d0"':''}>${anabaCourseHtml}</td>
         <td class="group-sep">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
           if (ijou === '1') return '<span class="result-ijou">取消</span>';

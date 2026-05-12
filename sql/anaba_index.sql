@@ -1111,22 +1111,25 @@ SELECT
     + COALESCE(f_hah_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
   , 1) AS overall_score,
 
-  -- ── コース別穴馬指数（コース別 baseline があれば使用）──────────
+  -- ── コース別穴馬指数 ──────────────────────────────────────────
+  -- ルール: コース別データがある → コースベースラインで差分
+  --         フォールバック時   → 全体の偏差をそのまま使用（ベース混在を防ぐ）
+  -- NULL 算術: f_ten_c.win_recovery が NULL なら式全体が NULL → COALESCE で次候補へ
   ROUND(
-    COALESCE(f_ten_c.win_recovery,   COALESCE(f_ten_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_agari_c.win_recovery, COALESCE(f_agari_o.win_recovery, COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_ichi_c.win_recovery,  COALESCE(f_ichi_o.win_recovery,  COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_goal_c.win_recovery,  COALESCE(f_goal_o.win_recovery,  COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_combo_c.win_recovery, COALESCE(f_combo_o.win_recovery, COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_idm_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_gek_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_man_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_chk_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_kya_c.win_recovery,   COALESCE(f_kya_o.win_recovery,  COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_jos_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_kyo_o.win_recovery,   COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_chi_tds.win_recovery, COALESCE(f_chi_o.win_recovery,  COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
-    + COALESCE(f_hah_tds.win_recovery, COALESCE(f_hah_o.win_recovery,  COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery))) - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery)
+    COALESCE(f_ten_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ten_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_agari_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_agari_o.win_recovery - bl_o.win_recovery, 0)
+    + COALESCE(f_ichi_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ichi_o.win_recovery  - bl_o.win_recovery, 0)
+    + COALESCE(f_goal_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_goal_o.win_recovery  - bl_o.win_recovery, 0)
+    + COALESCE(f_combo_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_combo_o.win_recovery - bl_o.win_recovery, 0)
+    + COALESCE(f_idm_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_gek_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_man_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_chk_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_kya_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_kya_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_jos_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_kyo_o.win_recovery   - bl_o.win_recovery, 0)
+    + COALESCE(f_chi_tds.win_recovery - bl_o.win_recovery, f_chi_o.win_recovery - bl_o.win_recovery, 0)
+    + COALESCE(f_hah_tds.win_recovery - bl_o.win_recovery, f_hah_o.win_recovery - bl_o.win_recovery, 0)
   , 1) AS course_score,
 
   -- ── スコア内訳 ────────────────────────────────────────────────
