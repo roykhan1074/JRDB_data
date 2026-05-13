@@ -40,7 +40,7 @@
     .race-header-right {
       width: 220px; flex-shrink: 0;
       border-left: 1px solid #f0f0f0;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; justify-content: center; gap: 10px;
       padding: 12px 16px;
     }
 
@@ -229,6 +229,21 @@
     /* 穴馬指数 */
     .anaba-na { color:#d1d5db; font-size:.72rem; }
 
+    /* 本命信頼度バッジ */
+    .fr-grade {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: 6px;
+      font-size: 1.05rem; font-weight: 800; flex-shrink: 0;
+    }
+    .fr-grade-S { background: #ca8a04; color: #fff; }
+    .fr-grade-A { background: #dc2626; color: #fff; }
+    .fr-grade-B { background: #15803d; color: #fff; }
+    .fr-grade-C { background: #6b7280; color: #fff; }
+    .fr-grade-D { background: #374151; color: #fff; }
+    .fr-grade-E { background: #e5e7eb; color: #6b7280; }
+    .fav-rel-meta { display: inline-flex; align-items: center; gap: 6px; cursor: help; border-left: 1px solid #e5e7eb; padding-left: 12px; }
+    .fav-rel-sub  { font-size: .75rem; color: #999; }
+
     /* 重点買い行ハイライト: 中穴(10~49倍) × スコア≥70 */
     tbody tr.chukiten { background: #f0fdf4 !important; }
     tbody tr.chukiten:hover { background: #bbf7d0 !important; }
@@ -363,6 +378,104 @@
     const m = RANK_MARK[rank];
     if (!m) return '<span class="mark mark-none">—</span>';
     return `<span class="mark ${m.cls}">${m.sym}</span>`;
+  }
+
+  // ──────────────────────────────────────────────────
+  // 1番人気信頼度 計算（JRDB指数ベース・オッズ非使用）
+  //
+  // 指数群が1番人気馬を支持しているかを測る。
+  // 低グレード(D/E) = 市場評価は高いがデータ的な裏付けが薄い「偽本命」シグナル。
+  // ──────────────────────────────────────────────────
+  function calcFavoriteReliability(rows) {
+    if (!rows || rows.length < 2) return null;
+    const fav = rows.find(r => parseInt(String(r.kijun_ninki ?? '').trim()) === 1);
+    if (!fav) return null;
+
+    let score = 0;
+    const bd = [];
+
+    // ── A. IDM優位性（最大+40 / 最小-20）────────────
+    // 差分も見る: 2位との差が大きいほど「抜けた存在」
+    const idmVals = rows.map(r => { const v = parseFloat(String(r.idm ?? '').trim()); return (isNaN(v) || v === 0) ? null : v; });
+    const favIdm  = parseFloat(String(fav.idm ?? '').trim());
+    if (!isNaN(favIdm) && favIdm !== 0) {
+      const sorted = idmVals.filter(v => v !== null).sort((a, b) => b - a);
+      const rank   = sorted.indexOf(favIdm) + 1;
+      const gap    = (rank === 1 && sorted.length >= 2) ? favIdm - sorted[1] : 0;
+      const pt     = rank === 1 ? (gap >= 5 ? 40 : gap >= 3 ? 30 : gap >= 1 ? 20 : 10)
+                   : rank === 2 ? 0 : rank === 3 ? -10 : -20;
+      score += pt;
+      bd.push(`IDM${rank}位:${pt >= 0 ? '+' : ''}${pt}`);
+    }
+
+    // ── B. 情報指数一致（最大+20 / 最小-15）──────────
+    // joho_index -1 は非開示のため除外（中立扱い）
+    const johoVals = rows.map(r => { const v = parseInt(String(r.joho_index ?? '').trim()); return (isNaN(v) || v === -1) ? null : v; });
+    const favJoho  = parseInt(String(fav.joho_index ?? '').trim());
+    if (!isNaN(favJoho) && favJoho !== -1) {
+      const sorted = johoVals.filter(v => v !== null).sort((a, b) => b - a);
+      const rank   = sorted.indexOf(favJoho) + 1;
+      const pt     = rank === 1 ? 20 : rank === 2 ? 5 : rank === 3 ? 0 : rank <= 5 ? -5 : -15;
+      score += pt;
+      bd.push(`情報${rank}位:${pt >= 0 ? '+' : ''}${pt}`);
+    }
+
+    // ── C. 展開（goal_juni）（最大+15 / 最小-10）────
+    // goal_juni: 値が小さいほど展開有利
+    const goalVals = rows.map(r => { const v = parseInt(String(r.goal_juni ?? '').trim()); return (isNaN(v) || v === 0) ? null : v; });
+    const favGoal  = parseInt(String(fav.goal_juni ?? '').trim());
+    if (!isNaN(favGoal) && favGoal > 0) {
+      const sorted = goalVals.filter(v => v !== null).sort((a, b) => a - b);
+      const rank   = sorted.indexOf(favGoal) + 1;
+      const pt     = rank === 1 ? 15 : rank <= 3 ? 10 : rank <= 5 ? 5 : rank <= 7 ? 0 : -10;
+      score += pt;
+      bd.push(`展開${rank}位:${pt >= 0 ? '+' : ''}${pt}`);
+    }
+
+    // ── D. 調教矢印（最大+15 / 最小-20）────────────
+    const yaji    = String(fav.chokyo_yajirushi ?? '').trim();
+    const yajiMap = { '1':[15,'↑↑'], '2':[8,'↑'], '3':[0,'→'], '4':[-10,'↓'], '5':[-20,'↓↓'] };
+    if (yaji in yajiMap) {
+      const [pt, lbl] = yajiMap[yaji];
+      score += pt;
+      if (pt !== 0) bd.push(`調教${lbl}:${pt >= 0 ? '+' : ''}${pt}`);
+    }
+
+    // ── E. 追切・仕上指数（レース内相対）（各最大+8 / 最小-5）
+    const favIdx = rows.indexOf(fav);
+    [
+      [rows.map(r => { const v = parseInt(String(r.oi_index     ?? '').trim()); return (isNaN(v)||v===0)?null:v; }), '追切'],
+      [rows.map(r => { const v = parseInt(String(r.shiage_index ?? '').trim()); return (isNaN(v)||v===0)?null:v; }), '仕上'],
+    ].forEach(([vals, lbl]) => {
+      const fv = vals[favIdx];
+      if (fv === null) return;
+      const sorted = vals.filter(v => v !== null).sort((a, b) => b - a);
+      const rank   = sorted.indexOf(fv) + 1;
+      const pt     = rank === 1 ? 8 : rank <= 3 ? 3 : rank <= 5 ? 0 : -5;
+      score += pt;
+      if (pt !== 0) bd.push(`${lbl}${rank}位:${pt >= 0 ? '+' : ''}${pt}`);
+    });
+
+    // ── F. テン・上がり指数順位（各最大+5 / 最小-3）
+    const ten   = parseInt(String(fav.ten_index_juni   ?? '').trim());
+    const agari = parseInt(String(fav.agari_index_juni ?? '').trim());
+    let ptPace = 0;
+    if (!isNaN(ten)   && ten   > 0) ptPace += ten   === 1 ? 5 : ten   <= 3 ? 2 : ten   >= 7 ? -3 : 0;
+    if (!isNaN(agari) && agari > 0) ptPace += agari === 1 ? 5 : agari <= 3 ? 2 : agari >= 7 ? -3 : 0;
+    if (ptPace !== 0) { score += ptPace; bd.push(`ペース:${ptPace >= 0 ? '+' : ''}${ptPace}`); }
+
+    // ── Grade変換 ─────────────────────────────────
+    // S≥70: 全指数が強く支持 / B≈標準（全体平均に一致） / E<-20: 偽本命の可能性
+    const grade   = score >= 70 ? 'S' : score >= 55 ? 'A' : score >= 25 ? 'B' : score >= 0 ? 'C' : score >= -20 ? 'D' : 'E';
+    const favName = fav.uma_name?.trim() || '—';
+    const oddsV   = parseFloat(String(fav.kijun_odds ?? '').trim());
+    const oddsStr = (!isNaN(oddsV) && oddsV > 0) ? `${oddsV.toFixed(1)}倍` : '';
+
+    return {
+      grade, score, favName, oddsStr,
+      tooltip: `本命信頼度 ${grade}（${score}点）\n1番人気: ${favName}${oddsStr ? '  ' + oddsStr : ''}\n` +
+               (bd.length ? bd.join(' / ') : '—'),
+    };
   }
 
   // ──────────────────────────────────────────────────
@@ -564,7 +677,8 @@
       const raceList   = racesRes.ok ? await racesRes.json() : [];
       const courseData = (courseRes?.ok) ? await courseRes.json() : null;
 
-      renderRaceHeader(raceList, race, courseData);
+      const favRel = calcFavoriteReliability(entries.rows);
+      renderRaceHeader(raceList, race, courseData, favRel);
       renderTable(entries.rows, race);
     } catch(e) {
       document.getElementById('race-header-wrap').innerHTML =
@@ -572,7 +686,7 @@
     }
   }
 
-  function renderRaceHeader(raceList, race, courseData) {
+  function renderRaceHeader(raceList, race, courseData, favRel) {
     const course    = COURSE_NAME[race.course_code] || race.course_code;
     const rnum      = parseInt(race.race_num);
     const name      = race.race_name_9char?.trim() || race.race_name?.trim() || `${rnum}R`;
@@ -629,6 +743,7 @@
                 <span>⏰ ${fmtTime(race.start_time)} 発走</span>
                 <span>${tds?`<span class="badge ${tdsBadge}">${tds}</span>`:''} ${dir}${dist}</span>
                 <span>🐎 ${heads}</span>
+                ${favRel ? `<span class="fav-rel-meta" data-tip="${favRel.tooltip.replace(/"/g,'&quot;')}">一番人気信頼度 <span class="fr-grade fr-grade-${favRel.grade}">${favRel.grade}</span></span>` : ''}
               </div>
             </div>
           </div>
