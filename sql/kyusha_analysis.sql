@@ -117,9 +117,17 @@ CREATE TABLE IF NOT EXISTS T_KYUSHA_FACTOR_AGG (
   PRIMARY KEY (trainer_code, agg_year, factor_type, factor_value),
   INDEX idx_kyusha_agg_factor_year  (factor_type, factor_value, agg_year),
   INDEX idx_kyusha_agg_year_trainer (agg_year, trainer_code),
-  INDEX idx_kyusha_agg_trainer_code (trainer_code)
+  INDEX idx_kyusha_agg_trainer_code (trainer_code),
+  -- entries サブクエリ用カバリングインデックス
+  -- (factor_type, factor_value) → trainer_code + 集計値を index-only で取れる
+  INDEX idx_kyusha_anaba_covering   (factor_type, factor_value, trainer_code, total_count, place_payout_sum)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='厩舎ファクター別集計（出馬表・信頼度スコア表示用）';
+
+-- 既存テーブルにカバリングインデックスが無ければ追加
+ALTER TABLE T_KYUSHA_FACTOR_AGG
+  ADD INDEX IF NOT EXISTS idx_kyusha_anaba_covering
+    (factor_type, factor_value, trainer_code, total_count, place_payout_sum);
 
 
 -- ============================================================

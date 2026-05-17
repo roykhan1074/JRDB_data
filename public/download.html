@@ -159,14 +159,14 @@
   </div>
 
   <!-- 穴馬指数ETL -->
-  <h1 style="margin-top:32px">穴馬指数 更新</h1>
+  <h1 style="margin-top:32px">EX指数 更新</h1>
   <div class="card">
     <p style="font-size:.88rem;color:#555;margin-bottom:16px;line-height:1.7">
       DBに蓄積されたデータ（T_KYI / T_BAC / T_SED / T_CYB / T_UKC）から<br>
       穴馬ファクト・ファクター集計・指数スコアを再計算します。<br>
       <span style="color:#d97706;font-weight:600">⚠ 指数計算（Part 4）は3〜5分かかります。</span>
     </p>
-    <button class="btn-run" id="btn-anaba" style="max-width:280px">穴馬指数を更新する</button>
+    <button class="btn-run" id="btn-anaba" style="max-width:280px">EX指数を更新する</button>
   </div>
 
   <div class="status-bar" id="anaba-status-bar">
@@ -390,8 +390,8 @@
     anabaBtn.disabled = true;
     anabaLog.textContent = '';
     anabaCard.style.display = '';
-    anabaStatus('running', '穴馬指数を更新中...');
-    anabaAppend('穴馬指数 ETL 開始', 'info');
+    anabaStatus('running', 'EX指数を更新中...');
+    anabaAppend('EX指数 ETL 開始', 'info');
 
     try {
       const res = await fetch('/api/anaba-etl', { method: 'POST' });
@@ -419,7 +419,7 @@
             if (payload.error) {
               anabaStatus('error', 'エラーが発生しました');
             } else {
-              anabaStatus('done', '穴馬指数の更新が完了しました');
+              anabaStatus('done', 'EX指数の更新が完了しました');
               anabaAppend('[完了] 出馬表を再読み込みすると新しい指数が表示されます', 'done');
             }
           }

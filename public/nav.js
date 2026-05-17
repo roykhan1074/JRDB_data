@@ -3,7 +3,6 @@
     { href: '/search.html',   label: 'レース検索' },
     { href: '/analyze.html',  label: '回収率分析' },
     { href: '/jockey.html',   label: '騎手能力' },
-    { href: '/person.html',   label: '人物分析' },
     { href: '/course.html',   label: 'コース別傾向' },
     { href: '/download.html', label: 'データ取込' },
     { href: '/stats.html',    label: 'データ確認' },

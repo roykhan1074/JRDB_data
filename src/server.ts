@@ -3,7 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { runPipeline, PrefixName } from './pipeline';
-import { createConnection } from './db/dbConnection';
+import { pool } from './db/dbConnection';
 
 const ANABA_SQL_FILE = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
 
@@ -146,51 +146,46 @@ app.get('/api/stats', async (_req, res) => {
     return;
   }
 
-  const conn = await createConnection();
-  try {
-    const tableNames = TABLE_META.map(m => m.table);
+  const tableNames = TABLE_META.map(m => m.table);
 
-    // information_schema から行数を一括取得（COUNT(*) の全件スキャンを回避）
-    const [isRows] = await conn.query<any>(
-      `SELECT table_name, table_rows
-       FROM information_schema.tables
-       WHERE table_schema = DATABASE()
-         AND table_name IN (${tableNames.map(() => '?').join(',')})`,
-      tableNames
-    );
-    const rowCountMap: Record<string, number> = {};
-    for (const r of isRows) rowCountMap[r.table_name] = Number(r.table_rows);
+  // information_schema から行数を一括取得（COUNT(*) の全件スキャンを回避）
+  const [isRows] = await pool.query<any>(
+    `SELECT table_name, table_rows
+     FROM information_schema.tables
+     WHERE table_schema = DATABASE()
+       AND table_name IN (${tableNames.map(() => '?').join(',')})`,
+    tableNames
+  );
+  const rowCountMap: Record<string, number> = {};
+  for (const r of isRows) rowCountMap[r.table_name] = Number(r.table_rows);
 
-    // 日付範囲・日数は各テーブルに並列クエリ（インデックスで高速化済み）
-    const results = await Promise.all(TABLE_META.map(async (meta) => {
-      try {
-        const dateExpr = `\`${meta.dateCol}\``;
-        const [[dateRow]] = await conn.query<any>(
-          `SELECT MIN(${dateExpr}) AS min_date,
-                  MAX(${dateExpr}) AS max_date,
-                  COUNT(DISTINCT ${dateExpr}) AS days
-           FROM \`${meta.table}\``
-        );
-        return {
-          table:   meta.table,
-          label:   meta.label,
-          prefix:  meta.prefix,
-          total:   rowCountMap[meta.table] ?? 0,
-          minDate: dateRow.min_date ?? null,
-          maxDate: dateRow.max_date ?? null,
-          days:    Number(dateRow.days),
-        };
-      } catch {
-        return { table: meta.table, label: meta.label, prefix: meta.prefix,
-                 total: rowCountMap[meta.table] ?? 0, minDate: null, maxDate: null, days: 0 };
-      }
-    }));
+  // 日付範囲・日数は各テーブルに並列クエリ（インデックスで高速化済み）
+  const results = await Promise.all(TABLE_META.map(async (meta) => {
+    try {
+      const dateExpr = `\`${meta.dateCol}\``;
+      const [[dateRow]] = await pool.query<any>(
+        `SELECT MIN(${dateExpr}) AS min_date,
+                MAX(${dateExpr}) AS max_date,
+                COUNT(DISTINCT ${dateExpr}) AS days
+         FROM \`${meta.table}\``
+      );
+      return {
+        table:   meta.table,
+        label:   meta.label,
+        prefix:  meta.prefix,
+        total:   rowCountMap[meta.table] ?? 0,
+        minDate: dateRow.min_date ?? null,
+        maxDate: dateRow.max_date ?? null,
+        days:    Number(dateRow.days),
+      };
+    } catch {
+      return { table: meta.table, label: meta.label, prefix: meta.prefix,
+               total: rowCountMap[meta.table] ?? 0, minDate: null, maxDate: null, days: 0 };
+    }
+  }));
 
-    statsCache = { data: results, expiresAt: Date.now() + 30_000 };
-    res.json(results);
-  } finally {
-    await conn.end();
-  }
+  statsCache = { data: results, expiresAt: Date.now() + 30_000 };
+  res.json(results);
 });
 
 // レース検索: GET /api/races?date=YYYYMMDD[&course=XX]
@@ -200,23 +195,18 @@ app.get('/api/races', async (req, res) => {
     res.status(400).json({ error: '日付はYYYYMMDD形式で指定してください' });
     return;
   }
-  const conn = await createConnection();
-  try {
-    const params: string[] = [date];
-    let sql = `SELECT course_code, year_code, kai, day_code, race_num,
-                      race_name, race_name_9char, distance, tds_code,
-                      grade, heads, start_time, data_kubun
-               FROM T_BAC WHERE ymd = ?`;
-    if (course && /^\d{2}$/.test(course)) {
-      sql += ' AND course_code = ?';
-      params.push(course);
-    }
-    sql += ' ORDER BY course_code, CAST(race_num AS UNSIGNED)';
-    const [rows] = await conn.query<any>(sql, params);
-    res.json(rows);
-  } finally {
-    await conn.end();
+  const params: string[] = [date];
+  let sql = `SELECT course_code, year_code, kai, day_code, race_num,
+                    race_name, race_name_9char, distance, tds_code,
+                    grade, heads, start_time, data_kubun
+             FROM T_BAC WHERE ymd = ?`;
+  if (course && /^\d{2}$/.test(course)) {
+    sql += ' AND course_code = ?';
+    params.push(course);
   }
+  sql += ' ORDER BY course_code, CAST(race_num AS UNSIGNED)';
+  const [rows] = await pool.query<any>(sql, params);
+  res.json(rows);
 });
 
 // レース単体情報: GET /api/races/:raceKey
@@ -232,21 +222,16 @@ app.get('/api/races/:raceKey', async (req, res) => {
   const day_code    = raceKey.slice(5, 6);
   const race_num    = raceKey.slice(6, 8);
 
-  const conn = await createConnection();
-  try {
-    const [[race]] = await conn.query<any>(
-      `SELECT course_code, year_code, kai, day_code, race_num,
-              ymd, race_name, race_name_9char, distance, tds_code,
-              grade, \`class\`, heads, start_time, data_kubun, migihidari, naigai
-       FROM T_BAC
-       WHERE course_code=? AND year_code=? AND kai=? AND day_code=? AND race_num=?`,
-      [course_code, year_code, kai, day_code, race_num]
-    );
-    if (!race) { res.status(404).json({ error: 'レースが見つかりません' }); return; }
-    res.json(race);
-  } finally {
-    await conn.end();
-  }
+  const [[race]] = await pool.query<any>(
+    `SELECT course_code, year_code, kai, day_code, race_num,
+            ymd, race_name, race_name_9char, distance, tds_code,
+            grade, \`class\`, heads, start_time, data_kubun, migihidari, naigai
+     FROM T_BAC
+     WHERE course_code=? AND year_code=? AND kai=? AND day_code=? AND race_num=?`,
+    [course_code, year_code, kai, day_code, race_num]
+  );
+  if (!race) { res.status(404).json({ error: 'レースが見つかりません' }); return; }
+  res.json(race);
 });
 
 // レース詳細: GET /api/races/:raceKey/entries
@@ -263,74 +248,69 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
   const day_code    = raceKey.slice(5, 6);
   const race_num    = raceKey.slice(6, 8);
 
-  const conn = await createConnection();
-  try {
-    const [rows] = await conn.query<any>(
-      `SELECT k.uma_num, k.waku_num, k.uma_name,
-              k.kyakushitsu,
-              k.kijun_odds, k.kijun_ninki,
-              k.joho_index,
-              k.idm,
-              k.goal_juni,
-              k.kyusha_index,
-              k.kishu_name, k.trainer_name,
-              k.kishu_code, k.trainer_code,
-              k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
-              k.chokyo_yajirushi,
-              k.nyukyu_nichi_mae,
-              k.hohbokusaki_rank,
-              k.joken_class,
-              c.oi_index, c.shiage_index,
-              c.chokyo_ryo_hyoka,
-              c.course_saka,
-              c.isshuumae_oi_index,
-              cr.win_recovery   AS combo_win_rr,
-              cr.place_recovery AS combo_place_rr,
-              cr.total_count    AS combo_n,
-              kya.anaba_place_rr  AS kyusha_anaba_place_rr,
-              kya.anaba_n         AS kyusha_anaba_n,
-              ans.overall_score AS anaba_overall_score,
-              ans.course_score  AS anaba_course_score,
-              ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
-              ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
-              ans.score_chokyo, ans.score_joshodo, ans.score_tekisei, ans.score_blood,
-              s.order_of_finish AS result_order,
-              s.win             AS result_win,
-              s.place           AS result_place,
-              s.ijou_kubun      AS result_ijou
-       FROM T_KYI k
-       LEFT JOIN T_CYB c
-         ON  c.course_code = k.course_code AND c.year_code = k.year_code
-         AND c.kai = k.kai AND c.day_code = k.day_code
-         AND c.race_num = k.race_num AND c.uma_num = k.uma_num
-       LEFT JOIN T_COMBO_RECOVERY cr
-         ON  cr.kishu_code   = k.kishu_code
-         AND cr.trainer_code = k.trainer_code
-       LEFT JOIN (
-         SELECT trainer_code,
-                ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
-                SUM(total_count)                                    AS anaba_n
-         FROM T_KYUSHA_FACTOR_AGG
-         WHERE factor_type = 'kyusha_idx_x_odds'
-           AND factor_value = 'plus_15~'
-         GROUP BY trainer_code
-       ) kya ON kya.trainer_code = TRIM(k.trainer_code)
-       LEFT JOIN T_ANABA_SCORE ans
-         ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
-         AND ans.kai = k.kai AND ans.day_code = k.day_code
-         AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
-       LEFT JOIN T_SED s
-         ON  s.course_code = k.course_code AND s.year_code = k.year_code
-         AND s.kai = k.kai AND s.day_code = k.day_code
-         AND s.race_num = k.race_num AND s.umaban = k.uma_num
-       WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?
-       ORDER BY CAST(k.uma_num AS UNSIGNED)`,
-      [course_code, year_code, kai, day_code, race_num]
-    );
-    res.json({ source: 'entries', rows });
-  } finally {
-    await conn.end();
-  }
+  const [rows] = await pool.query<any>(
+    `SELECT k.uma_num, k.waku_num, k.uma_name,
+            k.kyakushitsu,
+            k.kijun_odds, k.kijun_ninki,
+            k.joho_index,
+            k.idm,
+            k.goal_juni,
+            k.kyusha_index,
+            k.kishu_name, k.trainer_name,
+            k.kishu_code, k.trainer_code,
+            k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
+            k.chokyo_yajirushi,
+            k.nyukyu_nichi_mae,
+            k.hohbokusaki_rank,
+            k.joken_class,
+            c.oi_index, c.shiage_index,
+            c.chokyo_ryo_hyoka,
+            c.course_saka,
+            c.isshuumae_oi_index,
+            cr.win_recovery   AS combo_win_rr,
+            cr.place_recovery AS combo_place_rr,
+            cr.total_count    AS combo_n,
+            kya.anaba_place_rr  AS kyusha_anaba_place_rr,
+            kya.anaba_n         AS kyusha_anaba_n,
+            ans.overall_score AS anaba_overall_score,
+            ans.course_score  AS anaba_course_score,
+            ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
+            ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
+            ans.score_chokyo, ans.score_joshodo, ans.score_tekisei, ans.score_blood,
+            s.order_of_finish AS result_order,
+            s.win             AS result_win,
+            s.place           AS result_place,
+            s.ijou_kubun      AS result_ijou
+     FROM T_KYI k
+     LEFT JOIN T_CYB c
+       ON  c.course_code = k.course_code AND c.year_code = k.year_code
+       AND c.kai = k.kai AND c.day_code = k.day_code
+       AND c.race_num = k.race_num AND c.uma_num = k.uma_num
+     LEFT JOIN T_COMBO_RECOVERY cr
+       ON  cr.kishu_code   = k.kishu_code
+       AND cr.trainer_code = k.trainer_code
+     LEFT JOIN (
+       SELECT trainer_code,
+              ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
+              SUM(total_count)                                    AS anaba_n
+       FROM T_KYUSHA_FACTOR_AGG
+       WHERE factor_type = 'kyusha_idx_x_odds'
+         AND factor_value = 'plus_15~'
+       GROUP BY trainer_code
+     ) kya ON kya.trainer_code = k.trainer_code
+     LEFT JOIN T_ANABA_SCORE ans
+       ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
+       AND ans.kai = k.kai AND ans.day_code = k.day_code
+       AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
+     LEFT JOIN T_SED s
+       ON  s.course_code = k.course_code AND s.year_code = k.year_code
+       AND s.kai = k.kai AND s.day_code = k.day_code
+       AND s.race_num = k.race_num AND s.umaban = k.uma_num
+     WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?
+     ORDER BY CAST(k.uma_num AS UNSIGNED)`,
+    [course_code, year_code, kai, day_code, race_num]
+  );
+  res.json({ source: 'entries', rows });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -487,9 +467,8 @@ app.post('/api/analyze', async (req, res) => {
 
   sql += ' LIMIT 2000';
 
-  const conn = await createConnection();
   try {
-    const [rows] = await conn.query<any>(sql, params);
+    const [rows] = await pool.query<any>(sql, params);
     // レスポンスに集計キーのラベルを付与
     const aggLabels = aggKeys.map((k, i) => ({
       key: `agg_key_${i + 1}`,
@@ -498,8 +477,6 @@ app.post('/api/analyze', async (req, res) => {
     res.json({ aggLabels, rows });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
-  } finally {
-    await conn.end();
   }
 });
 
@@ -517,20 +494,17 @@ app.get('/api/suggest', async (req, res) => {
   const col = colMap[type ?? ''];
   if (!col) { res.status(400).json({ error: '不正なtype' }); return; }
 
-  const conn = await createConnection();
-  try {
-    const isUmanushi = (type === 'umanushi');
-    const pattern = isUmanushi ? `%${q.trim()}%` : `${q.trim()}%`;
-    const [rows] = await conn.query<any>(
-      `SELECT DISTINCT TRIM(\`${col}\`) AS name
-       FROM T_KYI
-       WHERE \`${col}\` LIKE ?
-       ORDER BY name
-       LIMIT 20`,
-      [pattern]
-    );
-    res.json(rows.map((r: any) => r.name));
-  } finally { await conn.end(); }
+  const isUmanushi = (type === 'umanushi');
+  const pattern = isUmanushi ? `%${q.trim()}%` : `${q.trim()}%`;
+  const [rows] = await pool.query<any>(
+    `SELECT DISTINCT TRIM(\`${col}\`) AS name
+     FROM T_KYI
+     WHERE \`${col}\` LIKE ?
+     ORDER BY name
+     LIMIT 20`,
+    [pattern]
+  );
+  res.json((rows as any[]).map((r: any) => r.name));
 });
 
 
@@ -540,16 +514,13 @@ app.get('/api/suggest', async (req, res) => {
 
 // コース一覧: GET /api/courses
 app.get('/api/courses', async (_req, res) => {
-  const conn = await createConnection();
-  try {
-    const [rows] = await conn.query<any>(
-      `SELECT course_code, tds_code, distance, total_count
-       FROM T_COURSE_FACTOR_AGG
-       WHERE factor_type='baseline' AND total_count >= 100
-       ORDER BY course_code, tds_code, CAST(distance AS UNSIGNED)`
-    );
-    res.json(rows);
-  } finally { await conn.end(); }
+  const [rows] = await pool.query<any>(
+    `SELECT course_code, tds_code, distance, total_count
+     FROM T_COURSE_FACTOR_AGG
+     WHERE factor_type='baseline' AND total_count >= 100
+     ORDER BY course_code, tds_code, CAST(distance AS UNSIGNED)`
+  );
+  res.json(rows);
 });
 
 // コース分析: GET /api/course-analysis?course_code=05&tds_code=1&distance=1600
@@ -559,37 +530,34 @@ app.get('/api/course-analysis', async (req, res) => {
     res.status(400).json({ error: 'course_code, tds_code, distance は必須です' });
     return;
   }
-  const conn = await createConnection();
-  try {
-    const [rows] = await conn.query<any>(
-      `SELECT factor_type, factor_value, total_count, win_count, renso_count, place_count,
-              win_rate, renso_rate, place_rate, win_recovery, place_recovery
+  const [rows] = await pool.query<any>(
+    `SELECT factor_type, factor_value, total_count, win_count, renso_count, place_count,
+            win_rate, renso_rate, place_rate, win_recovery, place_recovery
+     FROM T_COURSE_FACTOR_AGG
+     WHERE course_code=? AND tds_code=? AND distance=?
+     ORDER BY factor_type, factor_value`,
+    [course_code, tds_code, distance.padStart(4, ' ')]
+  );
+  // distance は TRIM済みなのでそのまま試す
+  const data = (rows as any[]).length ? rows : await (async () => {
+    const [r2] = await pool.query<any>(
+      `SELECT factor_type, factor_value, total_count, win_count, place_count,
+              win_rate, place_rate, win_recovery, place_recovery
        FROM T_COURSE_FACTOR_AGG
-       WHERE course_code=? AND tds_code=? AND distance=?
+       WHERE course_code=? AND tds_code=? AND TRIM(distance)=?
        ORDER BY factor_type, factor_value`,
-      [course_code, tds_code, distance.padStart(4, ' ')]
+      [course_code, tds_code, distance.trim()]
     );
-    // distance は TRIM済みなのでそのまま試す
-    const data = rows.length ? rows : await (async () => {
-      const [r2] = await conn.query<any>(
-        `SELECT factor_type, factor_value, total_count, win_count, place_count,
-                win_rate, place_rate, win_recovery, place_recovery
-         FROM T_COURSE_FACTOR_AGG
-         WHERE course_code=? AND tds_code=? AND TRIM(distance)=?
-         ORDER BY factor_type, factor_value`,
-        [course_code, tds_code, distance.trim()]
-      );
-      return r2;
-    })();
-    if (!data.length) { res.status(404).json({ error: 'データが見つかりません' }); return; }
-    // factor_type 別に整理
-    const result: Record<string, any[]> = {};
-    for (const row of data) {
-      if (!result[row.factor_type]) result[row.factor_type] = [];
-      result[row.factor_type].push(row);
-    }
-    res.json({ course_code, tds_code, distance: distance.trim(), factors: result });
-  } finally { await conn.end(); }
+    return r2;
+  })();
+  if (!(data as any[]).length) { res.status(404).json({ error: 'データが見つかりません' }); return; }
+  // factor_type 別に整理
+  const result: Record<string, any[]> = {};
+  for (const row of (data as any[])) {
+    if (!result[row.factor_type]) result[row.factor_type] = [];
+    result[row.factor_type].push(row);
+  }
+  res.json({ course_code, tds_code, distance: distance.trim(), factors: result });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -641,11 +609,9 @@ app.post('/api/anaba-etl', (req, res) => {
 
     // 件数確認
     try {
-      const conn = await createConnection();
-      const [[row]] = await conn.query<any>(
+      const [[row]] = await pool.query<any>(
         'SELECT COUNT(*) AS cnt FROM T_ANABA_SCORE'
       );
-      await conn.end();
       send(`完了: T_ANABA_SCORE ${Number(row.cnt).toLocaleString()} 件`);
     } catch { /* 無視 */ }
 
