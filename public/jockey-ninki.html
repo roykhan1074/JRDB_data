@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>騎手×人気 平均着順 — RACE INSIGHT</title>
+  <link rel="stylesheet" href="/race-insight.css">
+  <style>
+    .page-wrap { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 1.15rem; font-weight: 700; margin: 0 0 4px; }
+    .subtitle { font-size: .8rem; color: #6b7280; margin: 0 0 16px; }
+
+    .filter-bar {
+      display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      background: #f9fafb; border: 1px solid #e5e7eb;
+      border-radius: 6px; padding: 10px 14px; margin-bottom: 16px;
+      font-size: .82rem;
+    }
+    .filter-bar label { color: #374151; display: flex; align-items: center; gap: 5px; }
+    .filter-bar input[type=number] {
+      width: 60px; padding: 3px 6px; border: 1px solid #d1d5db;
+      border-radius: 4px; font-size: .82rem;
+    }
+    .filter-bar button {
+      padding: 4px 14px; background: #2563eb; color: #fff;
+      border: none; border-radius: 4px; cursor: pointer; font-size: .82rem;
+    }
+    .filter-bar button:hover { background: #1d4ed8; }
+
+    .legend {
+      display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      font-size: .75rem; color: #6b7280; margin-bottom: 10px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-box { width: 14px; height: 14px; border-radius: 2px; border: 1px solid #d1d5db; }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      table-layout: fixed;
+      width: auto;
+      border-collapse: collapse;
+      font-size: .8rem;
+      white-space: nowrap;
+    }
+    col.col-name  { width: 90px; }
+    col.col-total { width: 50px; }
+    col.col-band  { width: 68px; }
+
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 4px 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th { background: #f3f4f6; font-weight: 600; text-align: center; }
+    td { text-align: center; }
+    td.name-cell { text-align: left; }
+
+    /* ベンチマーク行 */
+    tr.benchmark-row td {
+      background: #f3f4f6;
+      font-weight: 700;
+      color: #374151;
+    }
+
+    /* 平均着順セルの色（全体平均との比較）*/
+    .perf-g2 { background: #bbf7d0; color: #166534; } /* 1.0以上 良い */
+    .perf-g1 { background: #dcfce7; color: #166534; } /* 0.3〜1.0 良い */
+    .perf-n  { background: #fff;    color: #374151; } /* ±0.3以内 */
+    .perf-b1 { background: #e5e7eb; color: #374151; } /* 0.3〜1.0 悪い */
+    .perf-b2 { background: #d1d5db; color: #374151; } /* 1.0以上 悪い */
+    .perf-na { color: #9ca3af; font-size: .7rem; }    /* データなし */
+
+    .loading { text-align: center; padding: 40px; color: #6b7280; font-size: .9rem; }
+    .error   { color: #dc2626; padding: 20px; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <script src="/nav.js"></script>
+
+  <div class="page-wrap">
+    <h1>騎手×人気 平均着順</h1>
+    <p class="subtitle">各人気帯における騎手ごとの平均着順。全体平均行との比較で色を付けています（緑=全体より良い / グレー=悪い）。</p>
+
+    <div class="filter-bar">
+      <label>対象年:
+        <input type="number" id="yearFrom" value="2020" min="2018" max="2026" step="1">
+        〜
+        <input type="number" id="yearTo"   value="2026" min="2018" max="2026" step="1">
+      </label>
+      <label>最低騎乗数:
+        <input type="number" id="minRides" value="100" min="10" max="2000" step="10">
+      </label>
+      <button id="btnLoad">表示</button>
+    </div>
+
+    <div class="legend">
+      <span>全体平均との差:</span>
+      <div class="legend-item"><div class="legend-box perf-g2"></div>1.0以上 良い</div>
+      <div class="legend-item"><div class="legend-box perf-g1"></div>0.3〜1.0 良い</div>
+      <div class="legend-item"><div class="legend-box perf-n"></div>±0.3以内</div>
+      <div class="legend-item"><div class="legend-box perf-b1"></div>0.3〜1.0 悪い</div>
+      <div class="legend-item"><div class="legend-box perf-b2"></div>1.0以上 悪い</div>
+    </div>
+
+    <div class="table-wrap">
+      <div id="tableArea" class="loading">読み込み中...</div>
+    </div>
+  </div>
+
+  <script>
+    const BANDS = ['1','2','3','4-6','7-9','10+'];
+    const BAND_LABELS = { '1':'1人気','2':'2人気','3':'3人気','4-6':'4〜6人気','7-9':'7〜9人気','10+':'10人気+' };
+
+    function perfClass(deviation) {
+      if (deviation === null || deviation === undefined) return 'perf-na';
+      if (deviation <= -1.0) return 'perf-g2';
+      if (deviation <  -0.3) return 'perf-g1';
+      if (deviation <   0.3) return 'perf-n';
+      if (deviation <   1.0) return 'perf-b1';
+      return 'perf-b2';
+    }
+
+    function buildTable(data) {
+      const { benchmarks, jockeys } = data;
+
+      let html = `<table>
+        <colgroup>
+          <col class="col-name">
+          <col class="col-total">`;
+      for (let i = 0; i < BANDS.length; i++) html += `<col class="col-band">`;
+      html += `</colgroup><thead><tr>
+          <th>騎手</th>
+          <th>騎乗数</th>`;
+      for (const b of BANDS) html += `<th>${BAND_LABELS[b]}</th>`;
+      html += `</tr></thead><tbody>`;
+
+      // ベンチマーク行
+      html += `<tr class="benchmark-row">
+        <td class="name-cell">全体平均</td>
+        <td>—</td>`;
+      for (const b of BANDS) {
+        const bm = benchmarks[b];
+        html += bm && bm.cnt > 0
+          ? `<td title="${bm.cnt.toLocaleString()}頭">${bm.avg_order.toFixed(1)}</td>`
+          : `<td class="perf-na">—</td>`;
+      }
+      html += `</tr>`;
+
+      // 騎手行
+      for (const j of jockeys) {
+        html += `<tr>
+          <td class="name-cell">${esc(j.kishu_name)}</td>
+          <td>${j.total.toLocaleString()}</td>`;
+        for (const b of BANDS) {
+          const bdata = j.bands[b];
+          if (!bdata) {
+            html += `<td class="perf-na">—</td>`;
+          } else {
+            const cls = perfClass(bdata.deviation);
+            const bm  = benchmarks[b];
+            const devSign = bdata.deviation > 0 ? '+' : '';
+            const devStr  = bdata.deviation !== null ? `${devSign}${bdata.deviation.toFixed(1)}` : '';
+            const tip = `騎手平均着順: ${bdata.avg_order.toFixed(1)}\n全体平均: ${bm ? bm.avg_order.toFixed(1) : '—'}\n差: ${devStr}\n騎乗数: ${bdata.cnt}`;
+            html += `<td class="${cls}" title="${tip}">${bdata.avg_order.toFixed(1)}</td>`;
+          }
+        }
+        html += `</tr>`;
+      }
+
+      html += `</tbody></table>`;
+      return html;
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function load() {
+      const yearFrom = String(document.getElementById('yearFrom').value);
+      const yearTo   = String(document.getElementById('yearTo').value);
+      const minRides = String(document.getElementById('minRides').value);
+
+      document.getElementById('tableArea').innerHTML = '<div class="loading">読み込み中...</div>';
+
+      try {
+        const params = new URLSearchParams({ yearFrom, yearTo, minRides });
+        const res = await fetch(`/api/jockey-ninki-stats?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        document.getElementById('tableArea').innerHTML = buildTable(data);
+      } catch (e) {
+        document.getElementById('tableArea').innerHTML = `<div class="error">エラー: ${e.message}</div>`;
+      }
+    }
+
+    document.getElementById('btnLoad').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

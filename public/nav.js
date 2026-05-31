@@ -2,8 +2,9 @@
   const NAV_LINKS = [
     { href: '/search.html',   label: 'レース検索' },
     { href: '/analyze.html',  label: '回収率分析' },
-    { href: '/jockey.html',   label: '騎手能力' },
-    { href: '/course.html',   label: 'コース別傾向' },
+    { href: '/jockey.html',       label: '騎手能力' },
+    { href: '/jockey-ninki.html', label: '騎手×人気偏差' },
+    { href: '/course.html',       label: 'コース別傾向' },
     { href: '/download.html', label: 'データ取込' },
     { href: '/stats.html',    label: 'データ確認' },
   ];

@@ -5,7 +5,9 @@ import * as fs from 'fs';
 import { runPipeline, PrefixName } from './pipeline';
 import { pool } from './db/dbConnection';
 
-const ANABA_SQL_FILE = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
+const ANABA_SQL_FILE    = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
+const TENKAI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'tenkai_index.sql');
+const PACEFIT_SQL_FILE  = path.join(__dirname, '..', 'sql', 'pacefit_index.sql');
 
 const PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
@@ -14,8 +16,22 @@ const PART_LABELS: Record<number, string> = {
   4: '指数計算 (T_ANABA_SCORE)',
 };
 
+const TENKAI_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクトデータ投入 (T_TENKAI_RACE_LOG)',
+  3: 'ファクター集計 (T_TENKAI_FACTOR_AGG)',
+  4: '指数計算 (T_TENKAI_SCORE)',
+};
+
+const PACEFIT_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: '全体ファクター集計 (T_PACEFIT_FACTOR_AGG)',
+  3: 'コース別ファクター集計 (T_PACEFIT_FACTOR_AGG)',
+  4: '指数計算 (T_PACEFIT_SCORE)',
+};
+
 /** SQLファイルを -- Part N: マーカーで4パートに分割 */
-function splitAnabaSql(content: string): string[] {
+function splitSqlByParts(content: string): string[] {
   const parts: string[] = [];
   const markers = ['-- Part 2:', '-- Part 3:', '-- Part 4:'];
   let remaining = content;
@@ -209,10 +225,140 @@ app.get('/api/races', async (req, res) => {
   res.json(rows);
 });
 
+// 騎手別 基準人気帯ごと平均着順偏差: GET /api/jockey-ninki-stats
+// キャッシュ: yearFrom:yearTo をキーに5分間保持
+const ninkiStatsCache = new Map<string, { benchmarks: any; allJockeys: any[]; expiresAt: number }>();
+
+app.get('/api/jockey-ninki-stats', async (req, res) => {
+  const yearFrom = String(req.query.yearFrom ?? '22').replace(/^20/, '').slice(-2);
+  const yearTo   = String(req.query.yearTo   ?? '26').replace(/^20/, '').slice(-2);
+  const minRides = Math.max(1, parseInt(String(req.query.minRides ?? '100')) || 100);
+
+  const BANDS = ['1','2','3','4-6','7-9','10+'];
+  const cacheKey = `${yearFrom}:${yearTo}`;
+  const cached = ninkiStatsCache.get(cacheKey);
+
+  let benchmarks: Record<string, {cnt:number; avg_order:number}>;
+  let allJockeys: any[];
+
+  if (cached && cached.expiresAt > Date.now()) {
+    benchmarks  = cached.benchmarks;
+    allJockeys  = cached.allJockeys;
+  } else {
+    // FORCE INDEX で T_KYI のフルスキャンを抑制（year_code範囲→インデックス Range scan）
+    const baseFrom = `FROM T_KYI k FORCE INDEX (idx_kyi_year_ninki_kishu)
+       JOIN T_SED s
+         ON  s.course_code=k.course_code AND s.year_code=k.year_code
+         AND s.kai=k.kai AND s.day_code=k.day_code
+         AND s.race_num=k.race_num AND s.umaban=k.uma_num
+       JOIN T_BAC b
+         ON  b.course_code=k.course_code AND b.year_code=k.year_code
+         AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+       WHERE k.year_code BETWEEN ? AND ?
+         AND k.kijun_ninki != '' AND k.kijun_ninki IS NOT NULL
+         AND s.ijou_kubun='0'
+         AND CAST(s.order_of_finish AS UNSIGNED) BETWEEN 1 AND 18
+         AND b.tds_code IN ('1','2')`;
+
+    // ベンチマーク・騎手クエリを並列実行、GROUP BY は生の kijun_ninki で CASE 式を避ける
+    const [[benchRows], [rows]] = await Promise.all([
+      pool.query<any>(
+        `SELECT CAST(k.kijun_ninki AS UNSIGNED) AS ninki_raw,
+           COUNT(*) AS cnt,
+           ROUND(AVG(CAST(s.order_of_finish AS UNSIGNED)), 2) AS avg_order
+         ${baseFrom}
+         GROUP BY ninki_raw`,
+        [yearFrom, yearTo]
+      ),
+      pool.query<any>(
+        `SELECT k.kishu_code, ANY_VALUE(k.kishu_name) AS kishu_name,
+           CAST(k.kijun_ninki AS UNSIGNED) AS ninki_raw,
+           COUNT(*) AS cnt,
+           ROUND(AVG(CAST(s.order_of_finish AS UNSIGNED)), 2) AS avg_order
+         ${baseFrom}
+           AND k.kishu_code != '' AND k.kishu_code IS NOT NULL
+         GROUP BY k.kishu_code, ninki_raw`,
+        [yearFrom, yearTo]
+      ),
+    ]);
+
+    // ninki_raw (数値) → バンド文字列への変換
+    function rawToBand(raw: number): string {
+      if (raw === 1) return '1';
+      if (raw === 2) return '2';
+      if (raw === 3) return '3';
+      if (raw <= 6)  return '4-6';
+      if (raw <= 9)  return '7-9';
+      return '10+';
+    }
+
+    benchmarks = {} as Record<string, {cnt:number; avg_order:number}>;
+    for (const b of BANDS) benchmarks[b] = { cnt: 0, avg_order: 0 };
+    for (const row of benchRows) {
+      const band = rawToBand(Number(row.ninki_raw));
+      const existing = benchmarks[band];
+      // 重み付き平均で合算（同バンドの複数raw値をまとめる）
+      const total = existing.cnt + Number(row.cnt);
+      benchmarks[band] = {
+        cnt: total,
+        avg_order: total > 0
+          ? (existing.cnt * existing.avg_order + Number(row.cnt) * Number(row.avg_order)) / total
+          : Number(row.avg_order),
+      };
+    }
+    // 小数点2桁に丸め
+    for (const b of BANDS) {
+      benchmarks[b].avg_order = Math.round(benchmarks[b].avg_order * 100) / 100;
+    }
+
+    const map = new Map<string, any>();
+    for (const row of rows) {
+      if (!map.has(row.kishu_code)) {
+        map.set(row.kishu_code, {
+          kishu_code: row.kishu_code,
+          kishu_name: row.kishu_name,
+          total: 0,
+          bands: {} as Record<string, {cnt:number; avg_order:number; deviation:number}|null>,
+        });
+        for (const b of BANDS) map.get(row.kishu_code).bands[b] = null;
+      }
+      const j = map.get(row.kishu_code);
+      const band = rawToBand(Number(row.ninki_raw));
+      const cnt = Number(row.cnt);
+      const ao  = Number(row.avg_order);
+      j.total += cnt;
+      // 同バンドの複数rawをまとめる
+      const existing = j.bands[band];
+      if (existing) {
+        const total = existing.cnt + cnt;
+        j.bands[band] = { cnt: total, avg_order: (existing.cnt * existing.avg_order + cnt * ao) / total, deviation: 0 };
+      } else {
+        j.bands[band] = { cnt, avg_order: ao, deviation: 0 };
+      }
+    }
+    // 偏差を計算
+    for (const j of map.values()) {
+      for (const b of BANDS) {
+        const bd = j.bands[b];
+        if (!bd) continue;
+        const bm = benchmarks[b];
+        bd.avg_order  = Math.round(bd.avg_order * 10) / 10;
+        bd.deviation  = bm ? Math.round((bd.avg_order - bm.avg_order) * 10) / 10 : null;
+      }
+    }
+
+    allJockeys = [...map.values()].sort((a, b) => b.total - a.total);
+    ninkiStatsCache.set(cacheKey, { benchmarks, allJockeys, expiresAt: Date.now() + 30 * 60 * 1000 });
+  }
+
+  const jockeys = allJockeys.filter(j => j.total >= minRides);
+  res.json({ benchmarks, jockeys });
+});
+
 // レース単体情報: GET /api/races/:raceKey
 app.get('/api/races/:raceKey', async (req, res) => {
   const { raceKey } = req.params;
-  if (!/^\d{8}$/.test(raceKey)) {
+  if (!/^\d{5}[0-9a-f]\d{2}$/i.test(raceKey)) {
     res.status(400).json({ error: '無効なレースキーです' });
     return;
   }
@@ -238,7 +384,7 @@ app.get('/api/races/:raceKey', async (req, res) => {
 // raceKey = course_code(2) + year_code(2) + kai(1) + day_code(1) + race_num(2)
 app.get('/api/races/:raceKey/entries', async (req, res) => {
   const { raceKey } = req.params;
-  if (!/^\d{8}$/.test(raceKey)) {
+  if (!/^\d{5}[0-9a-f]\d{2}$/i.test(raceKey)) {
     res.status(400).json({ error: '無効なレースキーです' });
     return;
   }
@@ -277,6 +423,8 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
             ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
             ans.score_chokyo, ans.score_joshodo, ans.score_tekisei, ans.score_blood,
+            pfs.overall_score AS pacefit_score,
+            pfs.pace_yoso     AS pacefit_pace,
             s.order_of_finish AS result_order,
             s.win             AS result_win,
             s.place           AS result_place,
@@ -302,6 +450,10 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
        AND ans.kai = k.kai AND ans.day_code = k.day_code
        AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
+     LEFT JOIN T_PACEFIT_SCORE pfs
+       ON  pfs.course_code = k.course_code AND pfs.year_code = k.year_code
+       AND pfs.kai = k.kai AND pfs.day_code = k.day_code
+       AND pfs.race_num = k.race_num AND pfs.uma_num = k.uma_num
      LEFT JOIN T_SED s
        ON  s.course_code = k.course_code AND s.year_code = k.year_code
        AND s.kai = k.kai AND s.day_code = k.day_code
@@ -579,7 +731,7 @@ app.post('/api/anaba-etl', (req, res) => {
       res.end(); return;
     }
     const sql = fs.readFileSync(ANABA_SQL_FILE, 'utf-8');
-    const parts = splitAnabaSql(sql);
+    const parts = splitSqlByParts(sql);
 
     for (let i = 0; i < parts.length; i++) {
       const partNum = i + 1;
@@ -623,6 +775,134 @@ app.post('/api/anaba-etl', (req, res) => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// 展開シナリオ指数 ETL: POST /api/tenkai-etl
+// tenkai_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/tenkai-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  (async () => {
+    if (!fs.existsSync(TENKAI_SQL_FILE)) {
+      send('エラー: sql/tenkai_index.sql が見つかりません', { error: true, done: true });
+      res.end(); return;
+    }
+    const sql = fs.readFileSync(TENKAI_SQL_FILE, 'utf-8');
+    const parts = splitSqlByParts(sql);
+
+    for (let i = 0; i < parts.length; i++) {
+      const partNum = i + 1;
+      const label = TENKAI_PART_LABELS[partNum] ?? `Part${partNum}`;
+      send(`[Part${partNum}] ${label} 開始...`);
+
+      let heartbeat: NodeJS.Timeout | undefined;
+      if (partNum >= 3) {
+        let elapsed = 0;
+        heartbeat = setInterval(() => {
+          elapsed += 15;
+          send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+        }, 15_000);
+      }
+
+      try {
+        await runMysqlSql(parts[i]);
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] ${label} 完了`);
+      } catch (err: any) {
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        res.end(); return;
+      }
+    }
+
+    try {
+      const [[row]] = await pool.query<any>(
+        'SELECT COUNT(*) AS cnt FROM T_TENKAI_SCORE'
+      );
+      send(`完了: T_TENKAI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+    } catch { /* 無視 */ }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 展開適合指数 ETL: POST /api/pacefit-etl
+// pacefit_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/pacefit-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  (async () => {
+    if (!fs.existsSync(PACEFIT_SQL_FILE)) {
+      send('エラー: sql/pacefit_index.sql が見つかりません', { error: true, done: true });
+      res.end(); return;
+    }
+    const sql = fs.readFileSync(PACEFIT_SQL_FILE, 'utf-8');
+    const parts = splitSqlByParts(sql);
+
+    for (let i = 0; i < parts.length; i++) {
+      const partNum = i + 1;
+      const label = PACEFIT_PART_LABELS[partNum] ?? `Part${partNum}`;
+      send(`[Part${partNum}] ${label} 開始...`);
+
+      let heartbeat: NodeJS.Timeout | undefined;
+      if (partNum >= 3) {
+        let elapsed = 0;
+        heartbeat = setInterval(() => {
+          elapsed += 15;
+          send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+        }, 15_000);
+      }
+
+      try {
+        await runMysqlSql(parts[i]);
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] ${label} 完了`);
+      } catch (err: any) {
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        res.end(); return;
+      }
+    }
+
+    try {
+      const [[row]] = await pool.query<any>(
+        'SELECT COUNT(*) AS cnt FROM T_PACEFIT_SCORE'
+      );
+      send(`完了: T_PACEFIT_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+    } catch { /* 無視 */ }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`サーバー起動: http://localhost:${PORT}`);
+  // デフォルト年範囲のキャッシュを起動直後にバックグラウンドで生成
+  setTimeout(() => {
+    fetch(`http://localhost:${PORT}/api/jockey-ninki-stats?yearFrom=2020&yearTo=2026&minRides=1`)
+      .then(() => console.log('騎手統計キャッシュ: 準備完了'))
+      .catch(() => {});
+  }, 500);
 });

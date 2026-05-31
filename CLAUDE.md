@@ -84,11 +84,12 @@
 | 19 | 48px | 調教SP | group-sep |
 | 20 | 48px | EX指数全体 | group-sep col-divider |
 | 21 | 48px | EX指数コース | |
-| 22 | 34px | 着順 | group-sep col-divider |
-| 23 | 52px | 単勝 | |
-| 24 | 52px | 複勝 | |
+| 22 | 48px | 展開指数 | group-sep |
+| 23 | 46px | 着順 | group-sep col-divider |
+| 24 | 52px | 単勝 | |
+| 25 | 52px | 複勝 | |
 
-**合計: col=24、th実効列=24（colspan込み）、td=24**
+**合計: col=25、th実効列=25（colspan込み）、td=25**
 
 ### 3. 列の非表示方法（唯一の正しい方法）
 ```

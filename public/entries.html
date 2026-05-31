@@ -280,7 +280,8 @@
         <col style="width:48px">  <!-- 調教SP -->
         <col style="width:48px">  <!-- EX指数全体 -->
         <col style="width:48px">  <!-- EX指数コース -->
-        <col style="width:34px">  <!-- 着順 -->
+        <col style="width:48px">  <!-- 展開指数 -->
+        <col style="width:46px">  <!-- 着順 -->
         <col style="width:52px">  <!-- 単勝 -->
         <col style="width:52px">  <!-- 複勝 -->
       </colgroup>
@@ -304,6 +305,7 @@
           <th rowspan="2" class="group-sep">調教SP</th>
           <th rowspan="2" class="group-sep col-divider" title="EX指数（全体）&#10;kijun_odds≥10倍の馬のみ表示&#10;各ファクター回収率偏差の合計">EX指数<br><small style="font-size:.65rem;font-weight:400">全体</small></th>
           <th rowspan="2" title="EX指数（コース別）&#10;場×芝ダ×距離帯の補正あり">EX指数<br><small style="font-size:.65rem;font-weight:400">コース</small></th>
+          <th rowspan="2" class="group-sep" title="展開適合指数&#10;ペース予想×テン指数順位×上がり指数順位&#10;スコア30+が特に有望">展開<br><small style="font-size:.65rem;font-weight:400">指数</small></th>
           <th rowspan="2" class="group-sep col-divider">着順</th>
           <th rowspan="2">単勝</th>
           <th rowspan="2">複勝</th>
@@ -614,7 +616,7 @@
 
   async function load() {
     const key = getKey();
-    if (!/^\d{8}$/.test(key)) {
+    if (!/^\d{5}[0-9a-f]\d{2}$/i.test(key)) {
       document.getElementById('race-header-wrap').innerHTML =
         '<div class="error-msg">無効なレースキーです</div>';
       return;
@@ -876,6 +878,18 @@
       const anabaOverallBg   = anabaBg(anabaOverallScore);
       const anabaCourseBg    = anabaBg(anabaCourseScore);
 
+      const pacefitScore = parseFloat(String(r.pacefit_score ?? ''));
+      const pacefitPace  = String(r.pacefit_pace ?? '').trim();
+      const pacefitHtml  = isNaN(pacefitScore)
+        ? '<span style="color:#9ca3af">—</span>'
+        : `<span>${Math.round(pacefitScore)}</span>`;
+      const pacefitBg = isNaN(pacefitScore) ? ''
+        : pacefitScore >= 25 ? ' style="background:#fbcfe8"'
+        : pacefitScore >= 15 ? ' style="background:#fef9c3"'
+        : pacefitScore <   0 ? ' style="background:#e5e7eb"'
+        : '';
+      const pacefitTip = isNaN(pacefitScore) ? '' : ` data-tip="展開適合指数: ${Math.round(pacefitScore)}&#10;ペース予想: ${pacefitPace || '—'}"`;
+
       // 重点買いハイライト: オッズ10〜49倍 × スコア≥70 (Item4)
       const isChukiten = !isNaN(oddsV) && oddsV >= 10 && oddsV < 50 && ts.score >= 70;
 
@@ -902,6 +916,7 @@
         })()}</td>
         <td class="group-sep col-divider"${anabaOverallBg}>${anabaOverallHtml}</td>
         <td${anabaCourseBg}>${anabaCourseHtml}</td>
+        <td class="group-sep"${pacefitBg}${pacefitTip}>${pacefitHtml}</td>
         <td class="group-sep col-divider">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
           if (ijou === '1') return '<span class="result-ijou">取消</span>';

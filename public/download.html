@@ -177,6 +177,44 @@
   <div class="card" id="anaba-log-card" style="padding:0; overflow:hidden; display:none">
     <div class="log-area" id="anaba-log-area"></div>
   </div>
+
+  <!-- 展開シナリオ指数ETL -->
+  <h1 style="margin-top:32px">展開シナリオ指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.9rem;color:#555;margin-bottom:12px">
+      全出走馬の脚質分布からレース展開を予測し、各馬の展開適性スコアを算出します。<br>
+      <span style="color:#d97706;font-weight:600">⚠ Part 3〜4 は数分かかります。</span>
+    </p>
+    <button class="btn-run" id="btn-tenkai" style="max-width:280px">展開シナリオ指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="tenkai-status-bar">
+    <div class="spinner" id="tenkai-spinner"></div>
+    <span id="tenkai-status-text"></span>
+  </div>
+
+  <div class="card" id="tenkai-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="tenkai-log-area"></div>
+  </div>
+
+  <!-- 展開適合指数ETL -->
+  <h1 style="margin-top:32px">展開適合指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.9rem;color:#555;margin-bottom:12px">
+      コース・距離帯別にテン指数順位・上がり指数順位の回収率を集計し、展開適合指数を算出します。<br>
+      <span style="color:#d97706;font-weight:600">⚠ Part 3〜4 は数分かかります。</span>
+    </p>
+    <button class="btn-run" id="btn-pacefit" style="max-width:280px">展開適合指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="pacefit-status-bar">
+    <div class="spinner" id="pacefit-spinner"></div>
+    <span id="pacefit-status-text"></span>
+  </div>
+
+  <div class="card" id="pacefit-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="pacefit-log-area"></div>
+  </div>
 </div>
 
 <script>
@@ -430,6 +468,146 @@
       anabaAppend('エラー: ' + err.message, 'error');
     } finally {
       anabaBtn.disabled = false;
+    }
+  });
+
+  // ── 展開シナリオ指数 ETL ──────────────────────────────
+  const tenkaiLog   = document.getElementById('tenkai-log-area');
+  const tenkaiCard  = document.getElementById('tenkai-log-card');
+  const tenkaiBar   = document.getElementById('tenkai-status-bar');
+  const tenkaiSpin  = document.getElementById('tenkai-spinner');
+  const tenkaiText  = document.getElementById('tenkai-status-text');
+  const tenkaiBtn   = document.getElementById('btn-tenkai');
+
+  function tenkaiAppend(msg, cls) {
+    if (!tenkaiCard.style.display || tenkaiCard.style.display === 'none') tenkaiCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    tenkaiLog.appendChild(line);
+    tenkaiLog.scrollTop = tenkaiLog.scrollHeight;
+  }
+
+  function tenkaiStatus(state, text) {
+    tenkaiBar.className = 'status-bar ' + state;
+    tenkaiText.textContent = text;
+    tenkaiSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  tenkaiBtn.addEventListener('click', async () => {
+    tenkaiBtn.disabled = true;
+    tenkaiLog.textContent = '';
+    tenkaiCard.style.display = '';
+    tenkaiStatus('running', '展開シナリオ指数を更新中...');
+    tenkaiAppend('展開シナリオ指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/tenkai-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            tenkaiAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              tenkaiStatus('error', 'エラーが発生しました');
+            } else {
+              tenkaiStatus('done', '展開シナリオ指数の更新が完了しました');
+              tenkaiAppend('[完了] 出馬表を再読み込みすると新しい指数が表示されます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      tenkaiStatus('error', 'エラー: ' + err.message);
+      tenkaiAppend('エラー: ' + err.message, 'error');
+    } finally {
+      tenkaiBtn.disabled = false;
+    }
+  });
+
+  // ── 展開適合指数 ETL ──────────────────────────────
+  const pacefitLog   = document.getElementById('pacefit-log-area');
+  const pacefitCard  = document.getElementById('pacefit-log-card');
+  const pacefitBar   = document.getElementById('pacefit-status-bar');
+  const pacefitSpin  = document.getElementById('pacefit-spinner');
+  const pacefitText  = document.getElementById('pacefit-status-text');
+  const pacefitBtn   = document.getElementById('btn-pacefit');
+
+  function pacefitAppend(msg, cls) {
+    if (!pacefitCard.style.display || pacefitCard.style.display === 'none') pacefitCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    pacefitLog.appendChild(line);
+    pacefitLog.scrollTop = pacefitLog.scrollHeight;
+  }
+
+  function pacefitStatus(state, text) {
+    pacefitBar.className = 'status-bar ' + state;
+    pacefitText.textContent = text;
+    pacefitSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  pacefitBtn.addEventListener('click', async () => {
+    pacefitBtn.disabled = true;
+    pacefitLog.textContent = '';
+    pacefitCard.style.display = '';
+    pacefitStatus('running', '展開適合指数を更新中...');
+    pacefitAppend('展開適合指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/pacefit-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            pacefitAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              pacefitStatus('error', 'エラーが発生しました');
+            } else {
+              pacefitStatus('done', '展開適合指数の更新が完了しました');
+              pacefitAppend('[完了] 出馬表を再読み込みすると新しい指数が表示されます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      pacefitStatus('error', 'エラー: ' + err.message);
+      pacefitAppend('エラー: ' + err.message, 'error');
+    } finally {
+      pacefitBtn.disabled = false;
     }
   });
 </script>
