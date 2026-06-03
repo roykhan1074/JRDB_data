@@ -97,6 +97,51 @@
     }
     .btn-reset:hover { background: #dfe6e9; }
 
+    .fact-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 14px; border-radius: 6px; font-size: .82rem;
+      background: #f0f4ff; border: 1px solid #d0daf0; margin-bottom: 8px;
+    }
+    .fact-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .fact-dot.ready  { background: #22c55e; }
+    .fact-dot.notyet { background: #9ca3af; }
+    .fact-label-text { color: #555; flex: 1; }
+    .btn-fact {
+      padding: 4px 12px; background: #fff; color: #0071e3;
+      border: 1px solid #0071e3; border-radius: 5px; font-size: .78rem;
+      cursor: pointer; white-space: nowrap;
+    }
+    .btn-fact:hover { background: #e8f0fe; }
+    .btn-fact:disabled { color: #aaa; border-color: #ccc; cursor: not-allowed; }
+
+    /* ETLモーダル */
+    .fact-modal-bg {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 500;
+      align-items: center; justify-content: center;
+    }
+    .fact-modal-bg.open { display: flex; }
+    .fact-modal {
+      background: #fff; border-radius: 10px; padding: 24px 28px; width: 480px; max-width: 95vw;
+      box-shadow: 0 8px 32px rgba(0,0,0,.25);
+    }
+    .fact-modal h3 { font-size: 1rem; margin-bottom: 14px; color: #1a1a2e; }
+    .fact-log {
+      height: 160px; overflow-y: auto; background: #1a1a2e; color: #a0f0a0;
+      border-radius: 5px; padding: 10px 12px; font-size: .78rem; font-family: monospace;
+      margin-bottom: 14px; white-space: pre-wrap; word-break: break-all;
+    }
+    .fact-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+    .btn-fact-start {
+      padding: 8px 20px; background: #0071e3; color: #fff;
+      border: none; border-radius: 6px; font-size: .9rem; cursor: pointer;
+    }
+    .btn-fact-start:hover:not(:disabled) { background: #005bbf; }
+    .btn-fact-start:disabled { background: #aaa; cursor: not-allowed; }
+    .btn-fact-close {
+      padding: 8px 16px; background: #eee; color: #555;
+      border: 1px solid #ccc; border-radius: 6px; font-size: .9rem; cursor: pointer;
+    }
+
     .status-bar {
       display: none; align-items: center; gap: 10px;
       padding: 8px 12px; border-radius: 6px; font-size: .85rem; margin-bottom: 8px;
@@ -396,6 +441,30 @@
             <span class="sep">〜</span>
             <input type="text" class="short" id="shiage_to">
           </div>
+          <div class="filter-row">
+            <span class="filter-label">調教SP</span>
+            <select class="rank-sel" id="chokyo_sp_from"><option value=""></option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select>
+            <span class="sep">〜</span>
+            <select class="rank-sel" id="chokyo_sp_to"><option value=""></option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">EX指数全体</span>
+            <input type="text" class="short" id="ex_overall_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="ex_overall_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">EX指数コース</span>
+            <input type="text" class="short" id="ex_course_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="ex_course_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">展開指数</span>
+            <input type="text" class="short" id="tenkai_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="tenkai_to">
+          </div>
         </div>
 
       </div>
@@ -412,12 +481,12 @@
           <label>集計キー 1</label>
           <select id="aggregate_01">
             <option value="">なし</option>
-            <option value="ymd">日付</option>
+            <option value="ymd">年</option>
             <option value="course">競馬場</option>
             <option value="tds">芝/ダート</option>
             <option value="distance">距離</option>
             <option value="class">クラス</option>
-            <option value="odds">基準オッズ</option>
+            <option value="odds">基準オッズ帯</option>
             <option value="odds_rank">基準人気</option>
             <option value="wakuban">枠番</option>
             <option value="umaban">馬番</option>
@@ -433,18 +502,22 @@
             <option value="kyakushitsu">脚質</option>
             <option value="oikiri">追切指数帯</option>
             <option value="shiage">仕上指数帯</option>
+            <option value="chokyo_sp">調教SP</option>
+            <option value="ex_overall">EX指数全体帯</option>
+            <option value="ex_course">EX指数コース帯</option>
+            <option value="tenkai">展開指数帯</option>
           </select>
         </div>
         <div class="agg-item">
           <label>集計キー 2</label>
           <select id="aggregate_02">
             <option value="">なし</option>
-            <option value="ymd">日付</option>
+            <option value="ymd">年</option>
             <option value="course">競馬場</option>
             <option value="tds">芝/ダート</option>
             <option value="distance">距離</option>
             <option value="class">クラス</option>
-            <option value="odds">基準オッズ</option>
+            <option value="odds">基準オッズ帯</option>
             <option value="odds_rank">基準人気</option>
             <option value="wakuban">枠番</option>
             <option value="umaban">馬番</option>
@@ -460,18 +533,22 @@
             <option value="kyakushitsu">脚質</option>
             <option value="oikiri">追切指数帯</option>
             <option value="shiage">仕上指数帯</option>
+            <option value="chokyo_sp">調教SP</option>
+            <option value="ex_overall">EX指数全体帯</option>
+            <option value="ex_course">EX指数コース帯</option>
+            <option value="tenkai">展開指数帯</option>
           </select>
         </div>
         <div class="agg-item">
           <label>集計キー 3</label>
           <select id="aggregate_03">
             <option value="">なし</option>
-            <option value="ymd">日付</option>
+            <option value="ymd">年</option>
             <option value="course">競馬場</option>
             <option value="tds">芝/ダート</option>
             <option value="distance">距離</option>
             <option value="class">クラス</option>
-            <option value="odds">基準オッズ</option>
+            <option value="odds">基準オッズ帯</option>
             <option value="odds_rank">基準人気</option>
             <option value="wakuban">枠番</option>
             <option value="umaban">馬番</option>
@@ -487,6 +564,10 @@
             <option value="kyakushitsu">脚質</option>
             <option value="oikiri">追切指数帯</option>
             <option value="shiage">仕上指数帯</option>
+            <option value="chokyo_sp">調教SP</option>
+            <option value="ex_overall">EX指数全体帯</option>
+            <option value="ex_course">EX指数コース帯</option>
+            <option value="tenkai">展開指数帯</option>
           </select>
         </div>
       </div>
@@ -496,6 +577,24 @@
   <div class="btn-row">
     <button class="btn-analyze" id="btn-analyze">📊 分析実行</button>
     <button class="btn-reset" id="btn-reset">リセット</button>
+  </div>
+
+  <div class="fact-bar" id="fact-bar">
+    <span class="fact-dot notyet" id="fact-dot"></span>
+    <span class="fact-label-text" id="fact-label">分析エンジン: 確認中...</span>
+    <button class="btn-fact" id="btn-fact-open">ファクトテーブル構築</button>
+  </div>
+
+  <!-- ファクトETLモーダル -->
+  <div class="fact-modal-bg" id="fact-modal-bg">
+    <div class="fact-modal">
+      <h3>分析ファクトテーブル構築</h3>
+      <div class="fact-log" id="fact-log">準備完了。「構築開始」を押してください。\n(初回のみ数分かかります)</div>
+      <div class="fact-modal-btns">
+        <button class="btn-fact-close" id="btn-fact-close">閉じる</button>
+        <button class="btn-fact-start" id="btn-fact-start">構築開始</button>
+      </div>
+    </div>
   </div>
 
   <br>
@@ -621,6 +720,10 @@
       latter_from: val('latter_from'), latter_to: val('latter_to'),
       oikiri_from: val('oikiri_from'), oikiri_to: val('oikiri_to'),
       shiage_from: val('shiage_from'), shiage_to: val('shiage_to'),
+      chokyo_sp_from: val('chokyo_sp_from'), chokyo_sp_to: val('chokyo_sp_to'),
+      ex_overall_from: val('ex_overall_from'), ex_overall_to: val('ex_overall_to'),
+      ex_course_from: val('ex_course_from'), ex_course_to: val('ex_course_to'),
+      tenkai_from: val('tenkai_from'), tenkai_to: val('tenkai_to'),
       kishu: val('kishu'), trainer: val('trainer'), umanushi: val('umanushi'),
       aggregate_01: val('aggregate_01'),
       aggregate_02: val('aggregate_02'),
@@ -694,6 +797,78 @@
   setupAC('trainer',  'trainer-list',  'trainer');
   setupAC('umanushi', 'umanushi-list', 'umanushi');
 
+  // ── ファクトテーブル状態 ────────────────────────────────────────────────
+  async function refreshFactStatus() {
+    try {
+      const r = await fetch('/api/analyze-fact-status');
+      const d = await r.json();
+      const dot   = document.getElementById('fact-dot');
+      const label = document.getElementById('fact-label');
+      const btn   = document.getElementById('btn-fact-open');
+      if (d.ready) {
+        dot.className   = 'fact-dot ready';
+        label.textContent = '分析エンジン: ファスト（ファクトテーブル使用中）';
+        btn.textContent   = '再構築';
+      } else {
+        dot.className   = 'fact-dot notyet';
+        label.textContent = '分析エンジン: スタンダード（ファクトテーブル未構築）';
+        btn.textContent   = 'ファクトテーブル構築';
+      }
+    } catch { /* 無視 */ }
+  }
+  refreshFactStatus();
+
+  // モーダル開閉
+  document.getElementById('btn-fact-open').addEventListener('click', () => {
+    document.getElementById('fact-modal-bg').classList.add('open');
+  });
+  document.getElementById('btn-fact-close').addEventListener('click', () => {
+    document.getElementById('fact-modal-bg').classList.remove('open');
+  });
+  document.getElementById('fact-modal-bg').addEventListener('click', e => {
+    if (e.target === document.getElementById('fact-modal-bg'))
+      document.getElementById('fact-modal-bg').classList.remove('open');
+  });
+
+  // ETL実行
+  document.getElementById('btn-fact-start').addEventListener('click', async () => {
+    const logEl  = document.getElementById('fact-log');
+    const startBtn = document.getElementById('btn-fact-start');
+    const closeBtn = document.getElementById('btn-fact-close');
+    logEl.textContent = '';
+    startBtn.disabled = true;
+    closeBtn.disabled = true;
+
+    try {
+      const resp = await fetch('/api/analyze-fact-etl', { method: 'POST' });
+      const reader = resp.body.getReader();
+      const dec    = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const d = JSON.parse(line.slice(5).trim());
+          if (d.message) { logEl.textContent += d.message + '\n'; logEl.scrollTop = 9999; }
+          if (d.done) {
+            await refreshFactStatus();
+            closeBtn.disabled = false;
+          }
+          if (d.error) closeBtn.disabled = false;
+        }
+      }
+    } catch (err) {
+      logEl.textContent += 'エラー: ' + err.message + '\n';
+    } finally {
+      startBtn.disabled = false;
+      closeBtn.disabled = false;
+    }
+  });
+
   document.addEventListener('click', e => {
     ['kishu','trainer','umanushi'].forEach(id => {
       if (!e.target.closest(`#${id}`) && !e.target.closest(`#${id}-list`)) {
@@ -709,6 +884,8 @@
      'idm_idx_from','idm_idx_to',
      'kyusha_idx_from','kyusha_idx_to',
      'oikiri_from','oikiri_to','shiage_from','shiage_to',
+     'ex_overall_from','ex_overall_to','ex_course_from','ex_course_to',
+     'tenkai_from','tenkai_to',
      'kishu','trainer','umanushi',
     ].forEach(id => { document.getElementById(id).value = ''; });
     // セレクトを先頭に戻す
@@ -717,6 +894,7 @@
      'umaban_from','umaban_to','info_from','info_to',
      'idm_mark_from','idm_mark_to',
      'goal_from','goal_to','first_from','first_to','latter_from','latter_to',
+     'chokyo_sp_from','chokyo_sp_to',
      'aggregate_01','aggregate_02','aggregate_03']
       .forEach(id => { document.getElementById(id).selectedIndex = 0; });
     document.getElementById('result-container').style.display = 'none';

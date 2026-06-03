@@ -472,7 +472,7 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
 // 集計キーの SELECT / GROUP BY 式のホワイトリスト
 // orderSql: ORDER BY 用の数値キャスト式。未指定の場合は groupSql を流用。
 const AGGREGATE_MAP: Record<string, { selectSql: string; groupSql: string; orderSql?: string; alias: string }> = {
-  ymd:         { alias: '日付',        selectSql: "b.ymd",           groupSql: "b.ymd" },
+  ymd:         { alias: '年',           selectSql: "LEFT(b.ymd,4)",   groupSql: "LEFT(b.ymd,4)" },
   course:      { alias: '競馬場',      groupSql: "b.course_code",
                  selectSql: "CASE b.course_code WHEN '01' THEN '札幌' WHEN '02' THEN '函館' WHEN '03' THEN '福島' WHEN '04' THEN '新潟' WHEN '05' THEN '東京' WHEN '06' THEN '中山' WHEN '07' THEN '中京' WHEN '08' THEN '京都' WHEN '09' THEN '阪神' WHEN '10' THEN '小倉' ELSE b.course_code END" },
   tds:         { alias: '芝ダ',        groupSql: "b.tds_code",
@@ -480,7 +480,9 @@ const AGGREGATE_MAP: Record<string, { selectSql: string; groupSql: string; order
   distance:    { alias: '距離',        selectSql: "b.distance",      groupSql: "b.distance",    orderSql: "CAST(b.distance AS UNSIGNED)" },
   class:       { alias: 'クラス',      groupSql: "b.`class`",
                  selectSql: "CASE b.`class` WHEN 'A1' THEN '新馬' WHEN 'A3' THEN '未勝利' WHEN '05' THEN '1勝クラス' WHEN '10' THEN '2勝クラス' WHEN '16' THEN '3勝クラス' WHEN 'OP' THEN 'オープン' ELSE b.`class` END" },
-  odds:        { alias: '基準オッズ',  selectSql: "k.kijun_odds",    groupSql: "k.kijun_odds",  orderSql: "CAST(k.kijun_odds AS DECIMAL(7,1))" },
+  odds:        { alias: '基準オッズ帯',
+                 groupSql: "CASE WHEN k.kijun_odds IS NULL THEN '—' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 2.0 THEN '~1.9' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 3.0 THEN '2.0~2.9' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 5.0 THEN '3.0~4.9' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 10.0 THEN '5.0~9.9' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 20.0 THEN '10.0~19.9' WHEN CAST(k.kijun_odds AS DECIMAL(7,1)) < 50.0 THEN '20.0~49.9' ELSE '50.0~' END",
+                 orderSql: "MIN(CAST(k.kijun_odds AS DECIMAL(7,1)))", selectSql: "" },
   odds_rank:   { alias: '基準人気',    selectSql: "k.kijun_ninki",   groupSql: "k.kijun_ninki", orderSql: "CAST(k.kijun_ninki AS UNSIGNED)" },
   wakuban:     { alias: '枠番',        selectSql: "k.waku_num",      groupSql: "k.waku_num",    orderSql: "CAST(k.waku_num AS UNSIGNED)" },
   umaban:      { alias: '馬番',        selectSql: "k.uma_num",       groupSql: "k.uma_num",     orderSql: "CAST(k.uma_num AS UNSIGNED)" },
@@ -501,11 +503,89 @@ const AGGREGATE_MAP: Record<string, { selectSql: string; groupSql: string; order
                  orderSql: "MIN(CAST(c.oi_index AS UNSIGNED))", selectSql: "" },
   shiage:      { alias: '仕上指数帯',  groupSql: "CASE WHEN CAST(c.shiage_index AS UNSIGNED) < 20 THEN '~20' WHEN CAST(c.shiage_index AS UNSIGNED) < 40 THEN '20~40' WHEN CAST(c.shiage_index AS UNSIGNED) < 50 THEN '40~50' WHEN CAST(c.shiage_index AS UNSIGNED) < 60 THEN '50~60' WHEN CAST(c.shiage_index AS UNSIGNED) < 70 THEN '60~70' WHEN CAST(c.shiage_index AS UNSIGNED) < 80 THEN '70~80' WHEN CAST(c.shiage_index AS UNSIGNED) < 90 THEN '80~90' WHEN CAST(c.shiage_index AS UNSIGNED) >= 90 THEN '90~' ELSE 'その他' END",
                  orderSql: "MIN(CAST(c.shiage_index AS UNSIGNED))", selectSql: "" },
+  chokyo_sp:   { alias: '調教SP',
+                 selectSql: "CASE WHEN sp_cte.sp_score IS NULL THEN '—' WHEN sp_cte.sp_score >= 4 THEN 'A' WHEN sp_cte.sp_score >= 2 THEN 'B' WHEN sp_cte.sp_score >= -1 THEN 'C' WHEN sp_cte.sp_score >= -4 THEN 'D' ELSE 'E' END",
+                 groupSql:  "CASE WHEN sp_cte.sp_score IS NULL THEN '—' WHEN sp_cte.sp_score >= 4 THEN 'A' WHEN sp_cte.sp_score >= 2 THEN 'B' WHEN sp_cte.sp_score >= -1 THEN 'C' WHEN sp_cte.sp_score >= -4 THEN 'D' ELSE 'E' END",
+                 orderSql:  "MIN(sp_cte.sp_score) DESC" },
+  ex_overall:  { alias: 'EX指数全体帯',
+                 groupSql: "CASE WHEN ans.overall_score IS NULL THEN '—' WHEN CAST(ans.overall_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(ans.overall_score AS DECIMAL(7,1)) < 20 THEN '0~20' WHEN CAST(ans.overall_score AS DECIMAL(7,1)) < 50 THEN '20~50' WHEN CAST(ans.overall_score AS DECIMAL(7,1)) < 100 THEN '50~100' ELSE '100~' END",
+                 orderSql: "MIN(CAST(COALESCE(ans.overall_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
+  ex_course:   { alias: 'EX指数コース帯',
+                 groupSql: "CASE WHEN ans.course_score IS NULL THEN '—' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 20 THEN '0~20' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 50 THEN '20~50' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 100 THEN '50~100' ELSE '100~' END",
+                 orderSql: "MIN(CAST(COALESCE(ans.course_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
+  tenkai:      { alias: '展開指数帯',
+                 groupSql: "CASE WHEN pfs.overall_score IS NULL THEN '—' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 15 THEN '0~15' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 25 THEN '15~25' ELSE '25~' END",
+                 orderSql: "MIN(CAST(COALESCE(pfs.overall_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
 };
 // caseベースの集計キーは selectSql と groupSql を同一にする
 for (const key of Object.keys(AGGREGATE_MAP)) {
   const entry = AGGREGATE_MAP[key];
   if (!entry.selectSql) entry.selectSql = entry.groupSql;
+}
+
+// ── ファクトテーブル用集計マップ（T_ANALYZE_FACT 対応・キャスト不要）
+const AGGREGATE_MAP_FACT: Record<string, { selectSql: string; groupSql: string; orderSql?: string; alias: string }> = {
+  ymd:         { alias: '年',           selectSql: "LEFT(f.ymd,4)",      groupSql: "LEFT(f.ymd,4)" },
+  course:      { alias: '競馬場',      groupSql:  "f.course_code",
+                 selectSql: "CASE f.course_code WHEN '01' THEN '札幌' WHEN '02' THEN '函館' WHEN '03' THEN '福島' WHEN '04' THEN '新潟' WHEN '05' THEN '東京' WHEN '06' THEN '中山' WHEN '07' THEN '中京' WHEN '08' THEN '京都' WHEN '09' THEN '阪神' WHEN '10' THEN '小倉' ELSE f.course_code END" },
+  tds:         { alias: '芝ダ',        groupSql:  "f.tds_code",
+                 selectSql: "CASE f.tds_code WHEN '1' THEN '芝' WHEN '2' THEN 'ダート' WHEN '3' THEN '障害' ELSE f.tds_code END" },
+  distance:    { alias: '距離',        selectSql: "f.distance",         groupSql: "f.distance",         orderSql: "f.distance" },
+  class:       { alias: 'クラス',      groupSql:  "f.class_code",
+                 selectSql: "CASE f.class_code WHEN 'A1' THEN '新馬' WHEN 'A3' THEN '未勝利' WHEN '05' THEN '1勝クラス' WHEN '10' THEN '2勝クラス' WHEN '16' THEN '3勝クラス' WHEN 'OP' THEN 'オープン' ELSE f.class_code END" },
+  odds:        { alias: '基準オッズ帯',
+                 groupSql: "CASE WHEN f.kijun_odds IS NULL THEN '—' WHEN f.kijun_odds < 2.0 THEN '~1.9' WHEN f.kijun_odds < 3.0 THEN '2.0~2.9' WHEN f.kijun_odds < 5.0 THEN '3.0~4.9' WHEN f.kijun_odds < 10.0 THEN '5.0~9.9' WHEN f.kijun_odds < 20.0 THEN '10.0~19.9' WHEN f.kijun_odds < 50.0 THEN '20.0~49.9' ELSE '50.0~' END",
+                 orderSql: "MIN(f.kijun_odds)", selectSql: "" },
+  odds_rank:   { alias: '基準人気',    selectSql: "f.kijun_ninki",      groupSql: "f.kijun_ninki",      orderSql: "f.kijun_ninki" },
+  wakuban:     { alias: '枠番',        selectSql: "f.waku_num",         groupSql: "f.waku_num",         orderSql: "f.waku_num" },
+  umaban:      { alias: '馬番',        selectSql: "f.uma_num",          groupSql: "f.uma_num",          orderSql: "f.uma_num" },
+  info:        { alias: '情報印',      selectSql: "f.in_joho",          groupSql: "f.in_joho",          orderSql: "f.in_joho" },
+  goal:        { alias: '展開順位',    selectSql: "f.goal_juni",        groupSql: "f.goal_juni",        orderSql: "f.goal_juni" },
+  idm_mark:    { alias: 'IDM印',       selectSql: "f.in_idm",           groupSql: "f.in_idm",           orderSql: "f.in_idm" },
+  idm_idx:     { alias: 'IDM指数帯',
+                 groupSql: "CASE WHEN f.idm < 30 THEN '~30' WHEN f.idm < 36 THEN '30~36' WHEN f.idm < 42 THEN '36~42' WHEN f.idm < 48 THEN '42~48' WHEN f.idm < 54 THEN '48~54' WHEN f.idm < 60 THEN '54~60' WHEN f.idm < 66 THEN '60~66' WHEN f.idm < 72 THEN '66~72' WHEN f.idm >= 72 THEN '72~' ELSE 'その他' END",
+                 orderSql: "MIN(f.idm)", selectSql: "" },
+  kyusha_idx:  { alias: '厩舎指数帯',
+                 groupSql: "CASE WHEN f.kyusha_index < -10 THEN '-20~-10' WHEN f.kyusha_index < 0 THEN '-10~0' WHEN f.kyusha_index < 10 THEN '0~10' WHEN f.kyusha_index < 20 THEN '10~20' WHEN f.kyusha_index <= 40 THEN '20~40' ELSE 'その他' END",
+                 orderSql: "MIN(f.kyusha_index)", selectSql: "" },
+  first:       { alias: '前3F順位',    selectSql: "f.ten_index_juni",   groupSql: "f.ten_index_juni",   orderSql: "f.ten_index_juni" },
+  latter:      { alias: '後3F順位',    selectSql: "f.agari_index_juni", groupSql: "f.agari_index_juni", orderSql: "f.agari_index_juni" },
+  jockey:      { alias: '騎手',        selectSql: "f.kishu_name",       groupSql: "f.kishu_name" },
+  trainer:     { alias: '調教師',      selectSql: "f.trainer_name",     groupSql: "f.trainer_name" },
+  kyakushitsu: { alias: '脚質',        groupSql:  "f.kyakushitsu",
+                 selectSql: "CASE f.kyakushitsu WHEN '1' THEN '逃げ' WHEN '2' THEN '先行' WHEN '3' THEN '差し' WHEN '4' THEN '追込' ELSE 'その他' END" },
+  oikiri:      { alias: '追切指数帯',
+                 groupSql: "CASE WHEN f.oi_index < 20 THEN '~20' WHEN f.oi_index < 40 THEN '20~40' WHEN f.oi_index < 50 THEN '40~50' WHEN f.oi_index < 60 THEN '50~60' WHEN f.oi_index < 70 THEN '60~70' WHEN f.oi_index < 80 THEN '70~80' WHEN f.oi_index < 90 THEN '80~90' WHEN f.oi_index >= 90 THEN '90~' ELSE 'その他' END",
+                 orderSql: "MIN(f.oi_index)", selectSql: "" },
+  shiage:      { alias: '仕上指数帯',
+                 groupSql: "CASE WHEN f.shiage_index < 20 THEN '~20' WHEN f.shiage_index < 40 THEN '20~40' WHEN f.shiage_index < 50 THEN '40~50' WHEN f.shiage_index < 60 THEN '50~60' WHEN f.shiage_index < 70 THEN '60~70' WHEN f.shiage_index < 80 THEN '70~80' WHEN f.shiage_index < 90 THEN '80~90' WHEN f.shiage_index >= 90 THEN '90~' ELSE 'その他' END",
+                 orderSql: "MIN(f.shiage_index)", selectSql: "" },
+  chokyo_sp:   { alias: '調教SP',
+                 selectSql: "CASE WHEN f.chokyo_sp IS NULL THEN '—' WHEN f.chokyo_sp >= 4 THEN 'A' WHEN f.chokyo_sp >= 2 THEN 'B' WHEN f.chokyo_sp >= -1 THEN 'C' WHEN f.chokyo_sp >= -4 THEN 'D' ELSE 'E' END",
+                 groupSql:  "CASE WHEN f.chokyo_sp IS NULL THEN '—' WHEN f.chokyo_sp >= 4 THEN 'A' WHEN f.chokyo_sp >= 2 THEN 'B' WHEN f.chokyo_sp >= -1 THEN 'C' WHEN f.chokyo_sp >= -4 THEN 'D' ELSE 'E' END",
+                 orderSql:  "MIN(f.chokyo_sp) DESC" },
+  ex_overall:  { alias: 'EX指数全体帯',
+                 groupSql: "CASE WHEN f.ex_overall IS NULL THEN '—' WHEN f.ex_overall < 0 THEN '<0' WHEN f.ex_overall < 20 THEN '0~20' WHEN f.ex_overall < 50 THEN '20~50' WHEN f.ex_overall < 100 THEN '50~100' ELSE '100~' END",
+                 orderSql: "MIN(COALESCE(f.ex_overall, -99999))", selectSql: "" },
+  ex_course:   { alias: 'EX指数コース帯',
+                 groupSql: "CASE WHEN f.ex_course IS NULL THEN '—' WHEN f.ex_course < 0 THEN '<0' WHEN f.ex_course < 20 THEN '0~20' WHEN f.ex_course < 50 THEN '20~50' WHEN f.ex_course < 100 THEN '50~100' ELSE '100~' END",
+                 orderSql: "MIN(COALESCE(f.ex_course, -99999))", selectSql: "" },
+  tenkai:      { alias: '展開指数帯',
+                 groupSql: "CASE WHEN f.tenkai_score IS NULL THEN '—' WHEN f.tenkai_score < 0 THEN '<0' WHEN f.tenkai_score < 15 THEN '0~15' WHEN f.tenkai_score < 25 THEN '15~25' ELSE '25~' END",
+                 orderSql: "MIN(COALESCE(f.tenkai_score, -99999))", selectSql: "" },
+};
+for (const key of Object.keys(AGGREGATE_MAP_FACT)) {
+  const e = AGGREGATE_MAP_FACT[key];
+  if (!e.selectSql) e.selectSql = e.groupSql;
+}
+
+let factTableReady = false;
+async function initFactTableStatus(): Promise<void> {
+  try {
+    const [rows] = await pool.query<any>('SELECT COUNT(*) AS c FROM T_ANALYZE_FACT');
+    factTableReady = Number((rows as any[])[0].c) > 0;
+    if (factTableReady) console.log('分析ファクトテーブル: 利用可能');
+  } catch { factTableReady = false; }
 }
 
 app.post('/api/analyze', async (req, res) => {
@@ -518,9 +598,99 @@ app.post('/api/analyze', async (req, res) => {
     kyusha_idx_from, kyusha_idx_to,
     first_from, first_to, latter_from, latter_to,
     oikiri_from, oikiri_to, shiage_from, shiage_to,
+    chokyo_sp_from, chokyo_sp_to,
+    ex_overall_from, ex_overall_to,
+    ex_course_from, ex_course_to,
+    tenkai_from, tenkai_to,
     kishu, trainer, umanushi,
     aggregate_01, aggregate_02, aggregate_03,
   } = req.body as Record<string, string>;
+
+  // ── ファクトテーブル高速パス ──────────────────────────────────────────────
+  if (factTableReady) {
+    const aggKeys = [aggregate_01, aggregate_02, aggregate_03]
+      .filter(k => k && AGGREGATE_MAP_FACT[k]);
+    const params: (string | number)[] = [];
+
+    const selectParts = aggKeys.map((k, i) =>
+      `(${AGGREGATE_MAP_FACT[k].selectSql}) AS \`agg_key_${i + 1}\``
+    );
+    selectParts.push(`
+      COUNT(*)                                                         AS total_heads,
+      SUM(f.order_of_finish = 1)                                       AS first_number,
+      SUM(f.order_of_finish = 2)                                       AS second_number,
+      SUM(f.order_of_finish = 3)                                       AS third_number,
+      SUM(f.order_of_finish >= 4)                                      AS also_ran,
+      ROUND(SUM(f.order_of_finish = 1) / COUNT(*) * 100, 1)           AS first_rate,
+      ROUND((SUM(f.order_of_finish = 1)
+            +SUM(f.order_of_finish = 2)) / COUNT(*) * 100, 1)         AS second_rate,
+      ROUND((SUM(f.order_of_finish = 1)
+            +SUM(f.order_of_finish = 2)
+            +SUM(f.order_of_finish = 3)) / COUNT(*) * 100, 1)         AS third_rate,
+      ROUND(COALESCE(SUM(f.win_pay),   0) / COUNT(*), 1)              AS win_recovery_rate,
+      ROUND(COALESCE(SUM(f.place_pay), 0) / COUNT(*), 1)              AS place_recovery_rate
+    `);
+
+    let sql = `SELECT ${selectParts.join(',\n')}
+      FROM T_ANALYZE_FACT f
+      WHERE 1=1
+    `;
+
+    if (ymd_from && ymd_to)           { sql += ' AND f.ymd BETWEEN ? AND ?';            params.push(ymd_from, ymd_to); }
+    if (course && course !== '00')    { sql += ' AND f.course_code = ?';                params.push(course); }
+    if (tds && tds !== '00')          { sql += ' AND f.tds_code = ?';                   params.push(tds); }
+    else                              { sql += " AND f.tds_code IN ('1','2')"; }
+    if (distance_from && distance_to) { sql += ' AND f.distance BETWEEN ? AND ?';       params.push(distance_from, distance_to); }
+    if (cls && cls !== '00')          { sql += ' AND f.class_code = ?';                 params.push(cls); }
+    else                              { sql += " AND f.class_code <> 'A1'"; }
+
+    if (odds_from && odds_to)             { sql += ' AND f.kijun_odds BETWEEN ? AND ?';        params.push(odds_from, odds_to); }
+    if (odds_rank_from && odds_rank_to)   { sql += ' AND f.kijun_ninki BETWEEN ? AND ?';       params.push(odds_rank_from, odds_rank_to); }
+    if (wakuban_from && wakuban_to)       { sql += ' AND f.waku_num BETWEEN ? AND ?';          params.push(wakuban_from, wakuban_to); }
+    if (umaban_from && umaban_to)         { sql += ' AND f.uma_num BETWEEN ? AND ?';           params.push(umaban_from, umaban_to); }
+    if (info_from && info_to)             { sql += ' AND f.in_joho BETWEEN ? AND ?';           params.push(info_from, info_to); }
+    if (goal_from && goal_to)             { sql += ' AND f.goal_juni BETWEEN ? AND ?';         params.push(goal_from, goal_to); }
+    if (idm_mark_from && idm_mark_to)     { sql += ' AND f.in_idm BETWEEN ? AND ?';            params.push(idm_mark_from, idm_mark_to); }
+    if (idm_idx_from && idm_idx_to)       { sql += ' AND f.idm BETWEEN ? AND ?';               params.push(idm_idx_from, idm_idx_to); }
+    if (kyusha_idx_from && kyusha_idx_to) { sql += ' AND f.kyusha_index BETWEEN ? AND ?';     params.push(kyusha_idx_from, kyusha_idx_to); }
+    if (first_from && first_to)           { sql += ' AND f.ten_index_juni BETWEEN ? AND ?';    params.push(first_from, first_to); }
+    if (latter_from && latter_to)         { sql += ' AND f.agari_index_juni BETWEEN ? AND ?';  params.push(latter_from, latter_to); }
+    if (oikiri_from && oikiri_to)         { sql += ' AND f.oi_index BETWEEN ? AND ?';          params.push(oikiri_from, oikiri_to); }
+    if (shiage_from && shiage_to)         { sql += ' AND f.shiage_index BETWEEN ? AND ?';      params.push(shiage_from, shiage_to); }
+    if (ex_overall_from && ex_overall_to) { sql += ' AND f.ex_overall BETWEEN ? AND ?';       params.push(ex_overall_from, ex_overall_to); }
+    if (ex_course_from  && ex_course_to)  { sql += ' AND f.ex_course BETWEEN ? AND ?';        params.push(ex_course_from, ex_course_to); }
+    if (tenkai_from && tenkai_to)         { sql += ' AND f.tenkai_score BETWEEN ? AND ?';      params.push(tenkai_from, tenkai_to); }
+    if (chokyo_sp_from && chokyo_sp_to) {
+      const gr = (g: string) => g === 'A' ? 1 : g === 'B' ? 2 : g === 'C' ? 3 : g === 'D' ? 4 : g === 'E' ? 5 : null;
+      const sf = gr(chokyo_sp_from), st = gr(chokyo_sp_to);
+      if (sf !== null && st !== null) {
+        sql += ` AND CASE WHEN f.chokyo_sp >= 4 THEN 1 WHEN f.chokyo_sp >= 2 THEN 2 WHEN f.chokyo_sp >= -1 THEN 3 WHEN f.chokyo_sp >= -4 THEN 4 WHEN f.chokyo_sp IS NOT NULL THEN 5 END BETWEEN ? AND ?`;
+        params.push(Math.min(sf, st), Math.max(sf, st));
+      }
+    }
+    if (kishu?.trim())    { sql += ' AND f.kishu_name    LIKE ?'; params.push(`${kishu.trim()}%`); }
+    if (trainer?.trim())  { sql += ' AND f.trainer_name  LIKE ?'; params.push(`${trainer.trim()}%`); }
+    if (umanushi?.trim()) { sql += ' AND f.umanushi_name LIKE ?'; params.push(`%${umanushi.trim()}%`); }
+
+    if (aggKeys.length > 0) {
+      sql += ' GROUP BY ' + aggKeys.map(k => AGGREGATE_MAP_FACT[k].groupSql).join(', ');
+      sql += ' ORDER BY ' + aggKeys.map(k => AGGREGATE_MAP_FACT[k].orderSql ?? AGGREGATE_MAP_FACT[k].groupSql).join(', ');
+    }
+    sql += ' LIMIT 2000';
+
+    try {
+      const _t0 = Date.now();
+      const [rows] = await pool.query<any>(sql, params);
+      const _ms = Date.now() - _t0;
+      const aggLabels = aggKeys.map((k, i) => ({ key: `agg_key_${i + 1}`, label: AGGREGATE_MAP_FACT[k].alias }));
+      res.json({ aggLabels, rows, _debug: { ms: _ms, usedFact: true } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+    return;
+  }
+
+  // ── フォールバック: 3テーブルJOIN ───────────────────────────────────────
 
   // 集計キーをホワイトリストで検証
   const aggKeys = [aggregate_01, aggregate_02, aggregate_03]
@@ -534,51 +704,132 @@ app.post('/api/analyze', async (req, res) => {
     return `(${AGGREGATE_MAP[k].selectSql}) AS \`${alias}\``;
   });
 
-  // 集計統計 — order_of_finish を一度だけ評価する派生サブクエリで CAST 回数を削減
+  // 集計統計 — t_sed を直接 INNER JOIN して inline で評価
+  // ※ 派生サブクエリ(sedDerived)は全行マテリアライズを起こして低速になるため使わない
   selectParts.push(`
-    COUNT(*)                                   AS total_heads,
-    SUM(fin.f1)                                AS first_number,
-    SUM(fin.f2)                                AS second_number,
-    SUM(fin.f3)                                AS third_number,
-    SUM(fin.fo)                                AS also_ran,
-    ROUND(SUM(fin.f1) / COUNT(*) * 100, 1)    AS first_rate,
-    ROUND((SUM(fin.f1) + SUM(fin.f2)) / COUNT(*) * 100, 1) AS second_rate,
-    ROUND((SUM(fin.f1) + SUM(fin.f2) + SUM(fin.f3)) / COUNT(*) * 100, 1) AS third_rate,
-    ROUND(COALESCE(SUM(fin.win_amt),   0) / COUNT(*), 1) AS win_recovery_rate,
-    ROUND(COALESCE(SUM(fin.place_amt), 0) / COUNT(*), 1) AS place_recovery_rate
+    COUNT(*)                                                                    AS total_heads,
+    SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 1)                       AS first_number,
+    SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 2)                       AS second_number,
+    SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 3)                       AS third_number,
+    SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) >= 4)                      AS also_ran,
+    ROUND(SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 1) / COUNT(*) * 100, 1) AS first_rate,
+    ROUND((SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 1)
+          +SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 2)) / COUNT(*) * 100, 1) AS second_rate,
+    ROUND((SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 1)
+          +SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 2)
+          +SUM(CAST(TRIM(fin.order_of_finish) AS UNSIGNED) = 3)) / COUNT(*) * 100, 1) AS third_rate,
+    ROUND(COALESCE(SUM(CAST(TRIM(fin.win)   AS UNSIGNED)), 0) / COUNT(*), 1)   AS win_recovery_rate,
+    ROUND(COALESCE(SUM(CAST(TRIM(fin.place) AS UNSIGNED)), 0) / COUNT(*), 1)   AS place_recovery_rate
   `);
-
-  // t_sed を派生テーブルで前処理し、CAST/TRIM をまとめる（1回だけ評価）
-  const sedDerived = `(
-    SELECT course_code, year_code, kai, day_code, race_num, umaban,
-      CAST(TRIM(order_of_finish) AS UNSIGNED)         AS fn,
-      CAST(TRIM(win)             AS UNSIGNED)         AS win_amt,
-      CAST(TRIM(place)           AS UNSIGNED)         AS place_amt,
-      CAST(TRIM(order_of_finish) AS UNSIGNED) = 1     AS f1,
-      CAST(TRIM(order_of_finish) AS UNSIGNED) = 2     AS f2,
-      CAST(TRIM(order_of_finish) AS UNSIGNED) = 3     AS f3,
-      CAST(TRIM(order_of_finish) AS UNSIGNED) >= 4    AS fo
-    FROM t_sed
-    WHERE ijou_kubun IN ('0','')
-  ) fin`;
 
   // 日付範囲あり → STRAIGHT_JOIN で idx_bac_ymd を先頭ドライバーに固定
   // 日付範囲なし → STRAIGHT_JOIN 外してオプティマイザに t_kyi 関数インデックスを使わせる
   const hint = (ymd_from && ymd_to) ? 'STRAIGHT_JOIN' : '';
+
+  // 調教SP CTE — chokyo_sp 集計またはフィルター使用時のみ生成
+  const needsSpCte = aggKeys.includes('chokyo_sp') || (chokyo_sp_from && chokyo_sp_to);
+  const cteParams: (string | number)[] = [];
+  let ctePrefix = '';
+  if (needsSpCte) {
+    // 日付フィルターがあれば CTE 内でも絞り込む（全スキャン防止）
+    const cteDateJoin = (ymd_from && ymd_to)
+      ? `INNER JOIN t_bac b2 ON b2.course_code=k2.course_code AND b2.year_code=k2.year_code AND b2.kai=k2.kai AND b2.day_code=k2.day_code AND b2.race_num=k2.race_num AND b2.ymd BETWEEN ? AND ?`
+      : '';
+    if (ymd_from && ymd_to) cteParams.push(ymd_from, ymd_to);
+
+    ctePrefix = `WITH sp_raw AS (
+  SELECT k2.course_code, k2.year_code, k2.kai, k2.day_code, k2.race_num, k2.uma_num,
+    CAST(c2.oi_index    AS DECIMAL(6,1)) AS oi_val,
+    CAST(c2.shiage_index AS DECIMAL(6,1)) AS shi_val,
+    TRIM(k2.chokyo_yajirushi) AS yj,
+    TRIM(k2.hohbokusaki_rank) AS hb,
+    SUM(CASE WHEN CAST(c2.oi_index    AS DECIMAL(6,1)) > 0 THEN 1 ELSE 0 END) OVER w AS oi_cnt,
+    SUM(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN 1 ELSE 0 END) OVER w AS shi_cnt,
+    RANK() OVER (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num
+                 ORDER BY CASE WHEN CAST(c2.oi_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index AS DECIMAL(6,1)) END DESC) AS oi_rank,
+    RANK() OVER (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num
+                 ORDER BY CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END DESC) AS shi_rank,
+    AVG(CASE WHEN CAST(c2.oi_index    AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index    AS DECIMAL(6,1)) END) OVER w AS oi_avg,
+    STDDEV_POP(CASE WHEN CAST(c2.oi_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index AS DECIMAL(6,1)) END) OVER w AS oi_sd,
+    AVG(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END) OVER w AS shi_avg,
+    STDDEV_POP(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END) OVER w AS shi_sd
+  FROM T_KYI k2
+  LEFT JOIN T_CYB c2 ON c2.course_code=k2.course_code AND c2.year_code=k2.year_code
+    AND c2.kai=k2.kai AND c2.day_code=k2.day_code AND c2.race_num=k2.race_num AND c2.uma_num=k2.uma_num
+  ${cteDateJoin}
+  WINDOW w AS (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num)
+),
+sp_cte AS (
+  SELECT course_code, year_code, kai, day_code, race_num, uma_num,
+    CASE
+      WHEN oi_cnt < 2 OR shi_cnt < 2 OR oi_val IS NULL OR oi_val <= 0 OR shi_val IS NULL OR shi_val <= 0 THEN NULL
+      ELSE
+        (CASE oi_rank WHEN 1 THEN 3 WHEN 2 THEN 2 WHEN 3 THEN 1 ELSE 0 END)
+       +(CASE shi_rank WHEN 1 THEN 3 WHEN 2 THEN 2 WHEN 3 THEN 1 ELSE 0 END)
+       +LEAST(0, ROUND((
+           CASE WHEN oi_sd  > 0 THEN (oi_val  - oi_avg)  / oi_sd  ELSE 0 END
+          +CASE WHEN shi_sd > 0 THEN (shi_val - shi_avg) / shi_sd ELSE 0 END
+         ) * 1.0, 0))
+       +(CASE yj WHEN '4' THEN -2 WHEN '5' THEN -4 ELSE 0 END)
+       +(CASE hb WHEN 'E' THEN -4 WHEN 'D' THEN -2 ELSE 0 END)
+    END AS sp_score
+  FROM sp_raw
+)
+`;
+  }
+
+  // 使用する機能に応じて JOIN を選択的に追加（不要な JOIN は省いてパフォーマンスを守る）
+  const needsCyb = aggKeys.some(k => k === 'oikiri' || k === 'shiage')
+    || !!(oikiri_from && oikiri_to)
+    || !!(shiage_from && shiage_to);
+
+  const needsAns = aggKeys.some(k => k === 'ex_overall' || k === 'ex_course')
+    || !!(ex_overall_from && ex_overall_to)
+    || !!(ex_course_from  && ex_course_to);
+
+  const needsPfs = aggKeys.includes('tenkai')
+    || !!(tenkai_from && tenkai_to);
+
+  const cybJoin = needsCyb
+    ? `LEFT JOIN t_cyb c
+      ON  k.course_code = c.course_code AND k.year_code = c.year_code
+      AND k.kai = c.kai AND k.day_code = c.day_code
+      AND k.race_num = c.race_num AND k.uma_num = c.uma_num`
+    : '';
+
+  const ansJoin = needsAns
+    ? `LEFT JOIN T_ANABA_SCORE ans
+      ON  k.course_code = ans.course_code AND k.year_code = ans.year_code
+      AND k.kai = ans.kai AND k.day_code = ans.day_code
+      AND k.race_num = ans.race_num AND k.uma_num = ans.uma_num`
+    : '';
+
+  const pfsJoin = needsPfs
+    ? `LEFT JOIN T_PACEFIT_SCORE pfs
+      ON  k.course_code = pfs.course_code AND k.year_code = pfs.year_code
+      AND k.kai = pfs.kai AND k.day_code = pfs.day_code
+      AND k.race_num = pfs.race_num AND k.uma_num = pfs.uma_num`
+    : '';
+
+  const spCteJoin = needsSpCte
+    ? `LEFT JOIN sp_cte ON sp_cte.course_code=k.course_code AND sp_cte.year_code=k.year_code
+      AND sp_cte.kai=k.kai AND sp_cte.day_code=k.day_code AND sp_cte.race_num=k.race_num AND sp_cte.uma_num=k.uma_num`
+    : '';
 
   let sql = `SELECT ${hint} ${selectParts.join(',\n')}
     FROM t_bac b
     INNER JOIN t_kyi k
       ON  b.course_code = k.course_code AND b.year_code = k.year_code
       AND b.kai = k.kai AND b.day_code = k.day_code AND b.race_num = k.race_num
-    INNER JOIN ${sedDerived}
+    INNER JOIN t_sed fin
       ON  k.course_code = fin.course_code AND k.year_code = fin.year_code
       AND k.kai = fin.kai AND k.day_code = fin.day_code
       AND k.race_num = fin.race_num AND k.uma_num = fin.umaban
-    LEFT JOIN t_cyb c
-      ON  k.course_code = c.course_code AND k.year_code = c.year_code
-      AND k.kai = c.kai AND k.day_code = c.day_code
-      AND k.race_num = c.race_num AND k.uma_num = c.uma_num
+      AND fin.ijou_kubun IN ('0','')
+    ${cybJoin}
+    ${ansJoin}
+    ${pfsJoin}
+    ${spCteJoin}
     WHERE 1=1
   `;
 
@@ -605,6 +856,17 @@ app.post('/api/analyze', async (req, res) => {
   if (latter_from && latter_to)     { sql += ' AND CAST(k.agari_index_juni AS UNSIGNED)   BETWEEN ? AND ?'; params.push(latter_from, latter_to); }
   if (oikiri_from && oikiri_to)     { sql += ' AND CAST(c.oi_index       AS UNSIGNED)     BETWEEN ? AND ?'; params.push(oikiri_from, oikiri_to); }
   if (shiage_from && shiage_to)     { sql += ' AND CAST(c.shiage_index   AS UNSIGNED)     BETWEEN ? AND ?'; params.push(shiage_from, shiage_to); }
+  if (ex_overall_from && ex_overall_to) { sql += ' AND CAST(ans.overall_score AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(ex_overall_from, ex_overall_to); }
+  if (ex_course_from  && ex_course_to)  { sql += ' AND CAST(ans.course_score  AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(ex_course_from, ex_course_to); }
+  if (tenkai_from && tenkai_to)         { sql += ' AND CAST(pfs.overall_score  AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(tenkai_from, tenkai_to); }
+  if (chokyo_sp_from && chokyo_sp_to) {
+    const gr = (g: string) => g === 'A' ? 1 : g === 'B' ? 2 : g === 'C' ? 3 : g === 'D' ? 4 : g === 'E' ? 5 : null;
+    const f = gr(chokyo_sp_from), t = gr(chokyo_sp_to);
+    if (f !== null && t !== null) {
+      sql += ` AND CASE WHEN sp_cte.sp_score >= 4 THEN 1 WHEN sp_cte.sp_score >= 2 THEN 2 WHEN sp_cte.sp_score >= -1 THEN 3 WHEN sp_cte.sp_score >= -4 THEN 4 WHEN sp_cte.sp_score IS NOT NULL THEN 5 END BETWEEN ? AND ?`;
+      params.push(Math.min(f, t), Math.max(f, t));
+    }
+  }
 
   // 条件句（Targets human）— 騎手・調教師は前方一致、馬主は中間一致
   if (kishu?.trim())    { sql += ' AND k.kishu_name    LIKE ?'; params.push(`${kishu.trim()}%`); }
@@ -620,13 +882,20 @@ app.post('/api/analyze', async (req, res) => {
   sql += ' LIMIT 2000';
 
   try {
-    const [rows] = await pool.query<any>(sql, params);
+    const finalSql = ctePrefix ? ctePrefix + sql : sql;
+    const allParams = [...cteParams, ...params];
+    const _t0 = Date.now();
+    const [rows] = await pool.query<any>(finalSql, allParams);
+    const _ms = Date.now() - _t0;
     // レスポンスに集計キーのラベルを付与
     const aggLabels = aggKeys.map((k, i) => ({
       key: `agg_key_${i + 1}`,
       label: AGGREGATE_MAP[k].alias,
     }));
-    res.json({ aggLabels, rows });
+    res.json({
+      aggLabels, rows,
+      _debug: { ms: _ms, needsAns, needsPfs, needsSpCte, sql: finalSql.slice(0, 2000) },
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -897,6 +1166,210 @@ app.post('/api/pacefit-etl', (req, res) => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// 分析ファクトテーブル: ステータス確認 + ETL
+// ────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/analyze-fact-status', (_req, res) => {
+  res.json({ ready: factTableReady });
+});
+
+app.post('/api/analyze-fact-etl', (_req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  (async () => {
+    // Step1: DDL
+    send('[Step1] テーブル定義中...');
+    await pool.query('DROP TABLE IF EXISTS T_ANALYZE_FACT');
+    await pool.query(`CREATE TABLE T_ANALYZE_FACT (
+      course_code       CHAR(2)           NOT NULL,
+      year_code         CHAR(2)           NOT NULL,
+      kai               CHAR(2)           NOT NULL,
+      day_code          CHAR(1)           NOT NULL,
+      race_num          CHAR(2)           NOT NULL,
+      uma_num           TINYINT UNSIGNED  NOT NULL,
+      ymd               CHAR(8)           NOT NULL,
+      tds_code          CHAR(1)           NOT NULL,
+      distance          SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      class_code        CHAR(2)           NOT NULL DEFAULT '',
+      waku_num          TINYINT UNSIGNED,
+      kijun_odds        DECIMAL(7,1),
+      kijun_ninki       TINYINT UNSIGNED,
+      in_joho           TINYINT UNSIGNED,
+      goal_juni         TINYINT UNSIGNED,
+      in_idm            TINYINT UNSIGNED,
+      idm               DECIMAL(6,1),
+      kyusha_index      DECIMAL(6,1),
+      ten_index_juni    TINYINT UNSIGNED,
+      agari_index_juni  TINYINT UNSIGNED,
+      kishu_name        VARCHAR(20),
+      trainer_name      VARCHAR(20),
+      umanushi_name     VARCHAR(40),
+      kyakushitsu       CHAR(1),
+      order_of_finish   TINYINT UNSIGNED,
+      win_pay           SMALLINT UNSIGNED,
+      place_pay         SMALLINT UNSIGNED,
+      oi_index          SMALLINT UNSIGNED,
+      shiage_index      SMALLINT UNSIGNED,
+      ex_overall        DECIMAL(7,1),
+      ex_course         DECIMAL(7,1),
+      tenkai_score      DECIMAL(7,1),
+      chokyo_sp         TINYINT,
+      PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num),
+      INDEX idx_af_ymd       (ymd),
+      INDEX idx_af_tds_class (tds_code, class_code),
+      INDEX idx_af_kishu     (kishu_name(10)),
+      INDEX idx_af_trainer   (trainer_name(10))
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPACT`);
+    send('[Step1] 完了');
+    factTableReady = false;
+
+    // Step2: 依存テーブル確認
+    send('[Step2] 依存テーブルを確認中...');
+    const [tblRows] = await pool.query<any>(
+      `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME IN ('T_ANABA_SCORE','T_PACEFIT_SCORE')`
+    );
+    const existingTbls = new Set((tblRows as any[]).map((r: any) => (r.TABLE_NAME as string).toLowerCase()));
+    const hasAnaba   = existingTbls.has('t_anaba_score');
+    const hasPacefit = existingTbls.has('t_pacefit_score');
+    send(`[Step2] T_ANABA_SCORE=${hasAnaba ? '有' : '無'}, T_PACEFIT_SCORE=${hasPacefit ? '有' : '無'}`);
+
+    // Step3: INSERT（数分かかる）
+    send('[Step3] データ挿入開始（数分かかります）...');
+    const ansJoinEtl   = hasAnaba   ? `LEFT JOIN T_ANABA_SCORE ans ON k.course_code=ans.course_code AND k.year_code=ans.year_code AND k.kai=ans.kai AND k.day_code=ans.day_code AND k.race_num=ans.race_num AND k.uma_num=ans.uma_num` : '';
+    const pfsJoinEtl   = hasPacefit ? `LEFT JOIN T_PACEFIT_SCORE pfs ON k.course_code=pfs.course_code AND k.year_code=pfs.year_code AND k.kai=pfs.kai AND k.day_code=pfs.day_code AND k.race_num=pfs.race_num AND k.uma_num=pfs.uma_num` : '';
+    const ansSelectEtl = hasAnaba   ? 'ans.overall_score, ans.course_score' : 'NULL, NULL';
+    const pfsSelectEtl = hasPacefit ? 'pfs.overall_score'                  : 'NULL';
+
+    const etlSql = `
+      INSERT INTO T_ANALYZE_FACT
+      WITH sp_raw AS (
+        SELECT k2.course_code, k2.year_code, k2.kai, k2.day_code, k2.race_num, k2.uma_num,
+          CAST(c2.oi_index     AS DECIMAL(6,1)) AS oi_val,
+          CAST(c2.shiage_index AS DECIMAL(6,1)) AS shi_val,
+          TRIM(k2.chokyo_yajirushi)             AS yj,
+          TRIM(k2.hohbokusaki_rank)             AS hb,
+          SUM(CASE WHEN CAST(c2.oi_index     AS DECIMAL(6,1)) > 0 THEN 1 ELSE 0 END) OVER w AS oi_cnt,
+          SUM(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN 1 ELSE 0 END) OVER w AS shi_cnt,
+          RANK() OVER (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num
+                       ORDER BY CASE WHEN CAST(c2.oi_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index AS DECIMAL(6,1)) END DESC) AS oi_rank,
+          RANK() OVER (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num
+                       ORDER BY CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END DESC) AS shi_rank,
+          AVG(CASE WHEN CAST(c2.oi_index     AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index     AS DECIMAL(6,1)) END) OVER w AS oi_avg,
+          STDDEV_POP(CASE WHEN CAST(c2.oi_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.oi_index AS DECIMAL(6,1)) END) OVER w AS oi_sd,
+          AVG(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END) OVER w AS shi_avg,
+          STDDEV_POP(CASE WHEN CAST(c2.shiage_index AS DECIMAL(6,1)) > 0 THEN CAST(c2.shiage_index AS DECIMAL(6,1)) END) OVER w AS shi_sd
+        FROM T_KYI k2
+        LEFT JOIN T_CYB c2
+          ON  c2.course_code=k2.course_code AND c2.year_code=k2.year_code
+          AND c2.kai=k2.kai AND c2.day_code=k2.day_code AND c2.race_num=k2.race_num AND c2.uma_num=k2.uma_num
+        WINDOW w AS (PARTITION BY k2.course_code,k2.year_code,k2.kai,k2.day_code,k2.race_num)
+      ),
+      sp_cte AS (
+        SELECT course_code, year_code, kai, day_code, race_num, uma_num,
+          CASE
+            WHEN oi_cnt < 2 OR shi_cnt < 2
+              OR oi_val IS NULL OR oi_val <= 0
+              OR shi_val IS NULL OR shi_val <= 0 THEN NULL
+            ELSE
+              (CASE oi_rank WHEN 1 THEN 3 WHEN 2 THEN 2 WHEN 3 THEN 1 ELSE 0 END)
+             +(CASE shi_rank WHEN 1 THEN 3 WHEN 2 THEN 2 WHEN 3 THEN 1 ELSE 0 END)
+             +LEAST(0, ROUND((
+                 CASE WHEN oi_sd  > 0 THEN (oi_val  - oi_avg)  / oi_sd  ELSE 0 END
+                +CASE WHEN shi_sd > 0 THEN (shi_val - shi_avg) / shi_sd ELSE 0 END
+               ) * 1.0, 0))
+             +(CASE yj WHEN '4' THEN -2 WHEN '5' THEN -4 ELSE 0 END)
+             +(CASE hb WHEN 'E' THEN -4 WHEN 'D' THEN -2 ELSE 0 END)
+          END AS sp_score
+        FROM sp_raw
+      )
+      SELECT
+        b.course_code, b.year_code, b.kai, b.day_code, b.race_num,
+        CAST(TRIM(k.uma_num)            AS UNSIGNED),
+        b.ymd, b.tds_code,
+        CAST(TRIM(b.distance)           AS UNSIGNED),
+        b.\`class\`,
+        CAST(TRIM(k.waku_num)           AS UNSIGNED),
+        CAST(k.kijun_odds               AS DECIMAL(7,1)),
+        CAST(k.kijun_ninki              AS UNSIGNED),
+        CAST(k.in_joho                  AS UNSIGNED),
+        CAST(k.goal_juni                AS UNSIGNED),
+        CAST(k.in_idm                   AS UNSIGNED),
+        CAST(k.idm                      AS DECIMAL(6,1)),
+        CAST(k.kyusha_index             AS DECIMAL(6,1)),
+        CAST(k.ten_index_juni           AS UNSIGNED),
+        CAST(k.agari_index_juni         AS UNSIGNED),
+        TRIM(k.kishu_name),
+        TRIM(k.trainer_name),
+        TRIM(k.umanushi_name),
+        k.kyakushitsu,
+        CAST(TRIM(fin.order_of_finish)  AS UNSIGNED),
+        COALESCE(CAST(TRIM(fin.win)     AS UNSIGNED), 0),
+        COALESCE(CAST(TRIM(fin.place)   AS UNSIGNED), 0),
+        CAST(c.oi_index                 AS UNSIGNED),
+        CAST(c.shiage_index             AS UNSIGNED),
+        ${ansSelectEtl},
+        ${pfsSelectEtl},
+        sp.sp_score
+      FROM t_bac b
+      INNER JOIN t_kyi k
+        ON  b.course_code = k.course_code AND b.year_code = k.year_code
+        AND b.kai = k.kai AND b.day_code = k.day_code AND b.race_num = k.race_num
+      INNER JOIN t_sed fin
+        ON  k.course_code = fin.course_code AND k.year_code = fin.year_code
+        AND k.kai = fin.kai AND k.day_code = fin.day_code
+        AND k.race_num = fin.race_num AND k.uma_num = fin.umaban
+        AND fin.ijou_kubun IN ('0','')
+      LEFT JOIN t_cyb c
+        ON  k.course_code = c.course_code AND k.year_code = c.year_code
+        AND k.kai = c.kai AND k.day_code = c.day_code AND k.race_num = c.race_num AND k.uma_num = c.uma_num
+      ${ansJoinEtl}
+      ${pfsJoinEtl}
+      LEFT JOIN sp_cte sp
+        ON  k.course_code = sp.course_code AND k.year_code = sp.year_code
+        AND k.kai = sp.kai AND k.day_code = sp.day_code AND k.race_num = sp.race_num
+        AND k.uma_num = sp.uma_num
+      WHERE b.\`class\` <> 'A1'
+    `;
+
+    const conn = await (pool as any).getConnection();
+    let hb3: NodeJS.Timeout | undefined;
+    try {
+      await conn.query('SET SESSION wait_timeout = 3600');
+      let elapsed = 0;
+      hb3 = setInterval(() => {
+        elapsed += 10;
+        send(`[Step3] 挿入中... (${elapsed}秒経過)`);
+      }, 10_000);
+      await conn.query(etlSql);
+      clearInterval(hb3);
+      hb3 = undefined;
+    } finally {
+      if (hb3) clearInterval(hb3);
+      conn.release();
+    }
+
+    const [[cntRow]] = await pool.query<any>('SELECT COUNT(*) AS cnt FROM T_ANALYZE_FACT');
+    send(`[Step3] 完了: ${Number(cntRow.cnt).toLocaleString()} 件を挿入`);
+
+    factTableReady = true;
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+
+  })().catch((err: any) => {
+    send(`エラー: ${err.message}`, { error: true, done: true });
+    res.end();
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`サーバー起動: http://localhost:${PORT}`);
   // デフォルト年範囲のキャッシュを起動直後にバックグラウンドで生成
@@ -905,4 +1378,5 @@ app.listen(PORT, () => {
       .then(() => console.log('騎手統計キャッシュ: 準備完了'))
       .catch(() => {});
   }, 500);
+  initFactTableStatus().catch(() => {});
 });
