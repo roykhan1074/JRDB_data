@@ -178,6 +178,26 @@
     <div class="log-area" id="anaba-log-area"></div>
   </div>
 
+  <!-- 本命指数ETL -->
+  <h1 style="margin-top:32px">本命指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.88rem;color:#555;margin-bottom:16px;line-height:1.7">
+      DBに蓄積されたデータから<strong>本命サイド（オッズ9.9倍以下）</strong>の<br>
+      情報指数・厩舎指数を含む14ファクターの回収率偏差指数を算出します。<br>
+      <span style="color:#d97706;font-weight:600">⚠ 指数計算（Part 4）は3〜5分かかります。</span>
+    </p>
+    <button class="btn-run" id="btn-honmei" style="max-width:280px">本命指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="honmei-status-bar">
+    <div class="spinner" id="honmei-spinner"></div>
+    <span id="honmei-status-text"></span>
+  </div>
+
+  <div class="card" id="honmei-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="honmei-log-area"></div>
+  </div>
+
   <!-- 展開シナリオ指数ETL -->
   <h1 style="margin-top:32px">展開シナリオ指数 更新</h1>
   <div class="card">
@@ -468,6 +488,76 @@
       anabaAppend('エラー: ' + err.message, 'error');
     } finally {
       anabaBtn.disabled = false;
+    }
+  });
+
+  // ── 本命指数 ETL ──────────────────────────────────────
+  const honmeiLog   = document.getElementById('honmei-log-area');
+  const honmeiCard  = document.getElementById('honmei-log-card');
+  const honmeiBar   = document.getElementById('honmei-status-bar');
+  const honmeiSpin  = document.getElementById('honmei-spinner');
+  const honmeiText  = document.getElementById('honmei-status-text');
+  const honmeiBtn   = document.getElementById('btn-honmei');
+
+  function honmeiAppend(msg, cls) {
+    if (!honmeiCard.style.display || honmeiCard.style.display === 'none') honmeiCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    honmeiLog.appendChild(line);
+    honmeiLog.scrollTop = honmeiLog.scrollHeight;
+  }
+
+  function honmeiStatus(state, text) {
+    honmeiBar.className = 'status-bar ' + state;
+    honmeiText.textContent = text;
+    honmeiSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  honmeiBtn.addEventListener('click', async () => {
+    honmeiBtn.disabled = true;
+    honmeiLog.textContent = '';
+    honmeiCard.style.display = '';
+    honmeiStatus('running', '本命指数を更新中...');
+    honmeiAppend('本命指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/honmei-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.startsWith('[Part4]') && payload.message.includes('中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            honmeiAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              honmeiStatus('error', 'エラーが発生しました');
+            } else {
+              honmeiStatus('done', '本命指数の更新が完了しました');
+              honmeiAppend('[完了] 出馬表を再読み込みすると新しい指数が表示されます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      honmeiStatus('error', 'エラー: ' + err.message);
+      honmeiAppend('エラー: ' + err.message, 'error');
+    } finally {
+      honmeiBtn.disabled = false;
     }
   });
 

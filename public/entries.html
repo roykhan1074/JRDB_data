@@ -278,9 +278,11 @@
         <col style="width:48px">  <!-- 後3F -->
         <col style="width:48px">  <!-- 厩舎指数 -->
         <col style="width:48px">  <!-- 調教SP -->
-        <col style="width:48px">  <!-- EX指数全体 -->
+        <col style="width:0">      <!-- EX指数全体（非表示） -->
         <col style="width:48px">  <!-- EX指数コース -->
-        <col style="width:48px">  <!-- 展開指数 -->
+        <col style="width:0">      <!-- 本命指数全体（非表示） -->
+        <col style="width:48px">  <!-- 本命指数コース -->
+        <col style="width:0">      <!-- 展開指数（非表示） -->
         <col style="width:46px">  <!-- 着順 -->
         <col style="width:52px">  <!-- 単勝 -->
         <col style="width:52px">  <!-- 複勝 -->
@@ -303,9 +305,11 @@
           <th rowspan="2" class="rank-col">後3F</th>
           <th rowspan="2" class="group-sep col-divider">厩指数</th>
           <th rowspan="2" class="group-sep">調教SP</th>
-          <th rowspan="2" class="group-sep col-divider" title="EX指数（全体）&#10;kijun_odds≥10倍の馬のみ表示&#10;各ファクター回収率偏差の合計">EX指数<br><small style="font-size:.65rem;font-weight:400">全体</small></th>
-          <th rowspan="2" title="EX指数（コース別）&#10;場×芝ダ×距離帯の補正あり">EX指数<br><small style="font-size:.65rem;font-weight:400">コース</small></th>
-          <th rowspan="2" class="group-sep" title="展開適合指数&#10;ペース予想×テン指数順位×上がり指数順位&#10;スコア30+が特に有望">展開<br><small style="font-size:.65rem;font-weight:400">指数</small></th>
+          <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">EX指数全体</th>
+          <th rowspan="2" class="group-sep col-divider" title="EX指数（コース別）&#10;kijun_odds≥10倍の馬のみ表示&#10;場×芝ダ×距離帯の補正あり">EX指数</th>
+          <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命全体</th>
+          <th rowspan="2" class="group-sep" title="本命指数（コース別）&#10;kijun_odds＜10倍の馬のみ表示&#10;場×芝ダ×距離帯の補正あり">本命</th>
+          <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">展開指数</th>
           <th rowspan="2" class="group-sep col-divider">着順</th>
           <th rowspan="2">単勝</th>
           <th rowspan="2">複勝</th>
@@ -314,6 +318,15 @@
       </thead>
       <tbody id="tbody"></tbody>
     </table>
+  </div>
+
+  <!-- 推奨買い目 -->
+  <div id="budget-bar" style="display:none;margin:12px 0 4px;max-width:900px;text-align:right;font-size:.88rem;color:#374151">
+    予算 <input id="budget-in" type="number" value="10000" step="1000" min="1000"
+      style="width:90px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:.88rem;text-align:right"> 円
+  </div>
+  <div id="betting-wrap" style="display:none;margin:0 0 24px;max-width:900px">
+    <div id="betting-inner"></div>
   </div>
 </main>
 
@@ -639,6 +652,7 @@
       const favRel = calcFavoriteReliability(entries.rows);
       renderRaceHeader(raceList, race, favRel);
       renderTable(entries.rows, race);
+      renderBetting(entries.rows);
     } catch(e) {
       document.getElementById('race-header-wrap').innerHTML =
         `<div class="error-msg">${e.message}</div>`;
@@ -668,7 +682,7 @@
     document.getElementById('race-header-wrap').innerHTML = `
       <div class="race-header-card">
         <div class="race-header-left">
-          <div class="rh-nav">${navBtns}</div>
+          <div class="rh-nav"><span style="font-size:1.25rem;font-weight:700;color:#1a1a2e;margin-right:8px;white-space:nowrap">${course}</span>${navBtns}</div>
           <div class="rh-info">
             <div class="race-rnum">${rnum}R</div>
             <div class="race-main">
@@ -829,9 +843,12 @@
         : comboGrade === 'B' ? 'background:#bbf7d0'
         : comboGrade === 'E' ? 'background:#e5e7eb' : '';
 
-      const isAnaba = !isNaN(oddsV) && oddsV >= 10.0;
-      const anabaOverallScore = parseFloat(String(r.anaba_overall_score ?? ''));
-      const anabaCourseScore  = parseFloat(String(r.anaba_course_score  ?? ''));
+      const isAnaba  = !isNaN(oddsV) && oddsV >= 10.0;
+      const isHonmei = !isNaN(oddsV) && oddsV > 0 && oddsV < 10.0;
+      const anabaOverallScore  = parseFloat(String(r.anaba_overall_score  ?? ''));
+      const anabaCourseScore   = parseFloat(String(r.anaba_course_score   ?? ''));
+      const honmeiOverallScore = parseFloat(String(r.honmei_overall_score ?? ''));
+      const honmeiCourseScore  = parseFloat(String(r.honmei_course_score  ?? ''));
 
       // ツールチップ内訳
       const anabaTip = (() => {
@@ -845,6 +862,7 @@
           ['激走',    r.score_gekiso],
           ['万券',    r.score_manbaken],
           ['調教',    r.score_chokyo],
+          ['厩舎',    r.score_kyusha],
           ['脚質',    r.score_kyakushitsu],
           ['上昇度',  r.score_joshodo],
           ['適性',    r.score_tekisei],
@@ -874,9 +892,50 @@
         return '';
       }
       const anabaOverallHtml = anabaInner(anabaOverallScore, anabaTip);
-      const anabaCourseHtml  = anabaInner(anabaCourseScore,  anabaTip);
+      const anabaCourseHtml  = anabaInner(anabaCourseScore,  null);
       const anabaOverallBg   = anabaBg(anabaOverallScore);
       const anabaCourseBg    = anabaBg(anabaCourseScore);
+
+      // 本命指数 ツールチップ内訳
+      const honmeiTip = (() => {
+        const parts = [
+          ['テン',    r.hms_score_ten],
+          ['上がり',  r.hms_score_agari],
+          ['位置',    r.hms_score_ichi],
+          ['ゴール',  r.hms_score_goal],
+          ['展開複合',r.hms_score_combo],
+          ['IDM',     r.hms_score_idm],
+          ['情報',    r.hms_score_joho],
+          ['厩舎',    r.hms_score_kyusha],
+          ['調教',    r.hms_score_chokyo],
+          ['脚質',    r.hms_score_kyakushitsu],
+          ['上昇度',  r.hms_score_joshodo],
+          ['適性',    r.hms_score_tekisei],
+          ['血統',    r.hms_score_blood],
+        ].filter(([, v]) => v != null && !isNaN(parseFloat(v)))
+         .map(([k, v]) => { const n = parseFloat(v); return `${k}:${n >= 0 ? '+' : ''}${n.toFixed(1)}`; });
+        return ('本命指数内訳\\n' + parts.join(' / ')).replace(/"/g, '&quot;');
+      })();
+      // 本命指数セル生成（odds<10のみ色付き表示）
+      function honmeiInner(score, tip) {
+        if (!isHonmei || isNaN(score)) return '<span class="anaba-na">—</span>';
+        const attr = tip ? ` data-tip="${tip}"` : '';
+        return `<span style="color:#333"${attr}>${Math.round(score)}</span>`;
+      }
+      // 本命指数セル背景色（EX指数と同じ色系）
+      // 50+: 赤 / 30+: ピンク / 15+: 黄色 / 0+: 白 / 負: グレー
+      function honmeiBg(score) {
+        if (!isHonmei || isNaN(score)) return '';
+        if (score >= 50) return ' style="background:#f87171"';
+        if (score >= 30) return ' style="background:#fbcfe8"';
+        if (score >= 15) return ' style="background:#fef9c3"';
+        if (score <   0) return ' style="background:#e5e7eb"';
+        return '';
+      }
+      const honmeiOverallHtml = honmeiInner(honmeiOverallScore, honmeiTip);
+      const honmeiCourseHtml  = honmeiInner(honmeiCourseScore,  honmeiTip);
+      const honmeiOverallBg   = honmeiBg(honmeiOverallScore);
+      const honmeiCourseBg    = honmeiBg(honmeiCourseScore);
 
       const pacefitScore = parseFloat(String(r.pacefit_score ?? ''));
       const pacefitPace  = String(r.pacefit_pace ?? '').trim();
@@ -914,9 +973,11 @@
           if (!g) return '<span class="sp-c">—</span>';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
-        <td class="group-sep col-divider"${anabaOverallBg}>${anabaOverallHtml}</td>
-        <td${anabaCourseBg}>${anabaCourseHtml}</td>
-        <td class="group-sep"${pacefitBg}${pacefitTip}>${pacefitHtml}</td>
+        <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
+        <td class="group-sep col-divider"${anabaCourseBg}>${anabaCourseHtml}</td>
+        <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
+        <td class="group-sep"${honmeiCourseBg}>${honmeiCourseHtml}</td>
+        <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
           if (ijou === '1') return '<span class="result-ijou">取消</span>';
@@ -944,6 +1005,433 @@
 
     document.getElementById('tbody').innerHTML = html;
     document.getElementById('table-wrap').style.display = '';
+  }
+
+  // ── 推奨買い目（複合シグナル分析）──────────────────────
+  let _lastBettingRows = null;
+  document.getElementById('budget-in').addEventListener('input', () => {
+    if (_lastBettingRows) renderBetting(_lastBettingRows);
+  });
+
+  function renderBetting(rows) {
+    _lastBettingRows = rows;
+    const budget = Math.max(1000, parseInt(document.getElementById('budget-in').value) || 10000);
+    const wrap  = document.getElementById('betting-wrap');
+    const inner = document.getElementById('betting-inner');
+    document.getElementById('budget-bar').style.display = '';
+
+    const CIRCLE = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩',
+                    '⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱'];
+
+    // chokyo_yajirushi: 1=↑↑ 2=↑ 3=→ 4=↓ 5=↓↓
+    // kyakushitsu: 1=逃 2=先 3=差 4=追
+    const YAJI_LABEL = {'1':'↑↑','2':'↑','3':'→','4':'↓','5':'↓↓'};
+    const STYLE_LABEL = {'1':'逃','2':'先','3':'差','4':'追'};
+
+    const horses = rows.map(r => {
+      const umaNum  = parseInt(r.uma_num);
+      const umaName = (r.uma_name || '').trim();
+      const odds    = parseFloat(String(r.kijun_odds ?? '').trim());
+      const isHonmei = !isNaN(odds) && odds > 0 && odds < 10;
+      const isAnaba  = !isNaN(odds) && odds >= 10;
+      const honmei   = parseFloat(String(r.honmei_course_score ?? ''));
+      const anaba    = parseFloat(String(r.anaba_course_score  ?? ''));
+      const johoRaw  = parseInt(String(r.joho_index ?? '').trim());
+      const joho     = (isNaN(johoRaw) || johoRaw === -1) ? null : johoRaw;
+      const idm      = parseFloat(String(r.idm ?? '').trim()) || 0;
+      const goalJuni = parseInt(String(r.goal_juni ?? '').trim()) || 99;
+      const agariJuni= parseInt(String(r.agari_index_juni ?? '').trim()) || 99;
+      const tenJuni  = parseInt(String(r.ten_index_juni ?? '').trim()) || 99;
+      const style    = String(r.kyakushitsu ?? '').trim();
+      const yaji     = String(r.chokyo_yajirushi ?? '').trim();
+      const oiIdx    = parseInt(String(r.oi_index ?? '').trim()) || 0;
+      const shiIdx   = parseInt(String(r.shiage_index ?? '').trim()) || 0;
+      const comboPlaceRr = parseFloat(r.combo_place_rr) || 0;
+      const comboN   = parseInt(r.combo_n) || 0;
+      const kyushaRr = parseFloat(r.kyusha_anaba_place_rr) || 0;
+      const kyushaN  = parseInt(r.kyusha_anaba_n) || 0;
+      const kishu    = (r.kishu_name || '').trim();
+      const trainer  = (r.trainer_name || '').trim();
+      return {
+        umaNum, umaName, odds, isHonmei, isAnaba, honmei, anaba,
+        joho, idm, goalJuni, agariJuni, tenJuni, style, yaji,
+        oiIdx, shiIdx, comboPlaceRr, comboN, kyushaRr, kyushaN,
+        kishu, trainer,
+      };
+    }).filter(h => !isNaN(h.umaNum) && h.umaNum > 0);
+
+    // ── ペースシナリオ ────────────────────────────────────
+    const escCnt   = horses.filter(h => h.style === '1').length;
+    const senCnt   = horses.filter(h => h.style === '2').length;
+    const frontCnt = escCnt + senCnt;
+    const n        = horses.length;
+    const fastPace = frontCnt >= Math.ceil(n * 0.38);
+    const slowPace = escCnt <= 1 && senCnt <= 1;
+    const paceLabel = fastPace ? `前${frontCnt}頭(逃${escCnt}先${senCnt}) → ハイペース想定`
+                    : slowPace ? `逃${escCnt}頭のみ → スローペース想定` : null;
+
+    // ── レース内コンテキスト（相対ランク用）────────────
+    // 追切指数・仕上指数のレース内ランク（0は未計測として除外）
+    const oiSorted  = horses.filter(h => h.oiIdx  > 0).map(h => h.oiIdx).sort((a,b) => b-a);
+    const shiSorted = horses.filter(h => h.shiIdx > 0).map(h => h.shiIdx).sort((a,b) => b-a);
+    function oiRankOf(h)  { return oiSorted.length  > 0 ? oiSorted.indexOf(h.oiIdx)  + 1 : 99; }
+    function shiRankOf(h) { return shiSorted.length > 0 ? shiSorted.indexOf(h.shiIdx) + 1 : 99; }
+    const oiTop25Cutoff   = Math.ceil(oiSorted.length  * 0.25);
+    const shiTop25Cutoff  = Math.ceil(shiSorted.length * 0.25);
+
+    // IDM中央値（能力フロア判定用）
+    const validIdms = horses.map(h => h.idm).filter(v => v > 0).sort((a,b) => a-b);
+    const idmMedian = validIdms.length > 0 ? validIdms[Math.floor(validIdms.length / 2)] : 0;
+
+    // 展開予測の有効頭数
+    const validGoalCnt = horses.filter(h => h.goalJuni < 90).length;
+
+    // ── 多角的シグナル評価 ────────────────────────────────
+    function evalHorse(h) {
+      const sigs = [];
+      let sc = 0;
+      const add = (cat, text, w) => { sigs.push({cat, text, w}); sc += w; };
+
+      // ── 能力フロアチェック ──────────────────────────────
+      // B/C/展開/調教シグナルはこれを通過した馬のみ発火する。
+      // 理由: 能力が最低クラスの馬をコンボや調教だけで推奨しないため。
+      const hasIdxSignal =
+        (h.isHonmei && !isNaN(h.honmei) && h.honmei >= 10) ||
+        (h.isAnaba  && !isNaN(h.anaba)  && h.anaba  >= 15);
+      const hasAbilityProxy =
+        (h.goalJuni < 90 && validGoalCnt > 0 && h.goalJuni <= Math.ceil(validGoalCnt * 0.45)) ||
+        (h.idm > 0 && h.idm >= idmMedian);
+      const abilityOk = hasIdxSignal || hasAbilityProxy;
+
+      // A. 指数シグナル（ゲートなし・常時評価）
+      if (h.isHonmei && !isNaN(h.honmei)) {
+        if      (h.honmei >= 50) add('idx', `本命指数${h.honmei.toFixed(0)}（回収134%帯）`, 3);
+        else if (h.honmei >= 30) add('idx', `本命指数${h.honmei.toFixed(0)}（回収100%超）`, 2);
+        else if (h.honmei >= 10) add('idx', `本命指数${h.honmei.toFixed(0)}`, 1);
+      }
+      if (h.isAnaba && !isNaN(h.anaba)) {
+        if      (h.anaba >= 100) add('idx', `EX指数${h.anaba.toFixed(0)}（最上位）`, 3);
+        else if (h.anaba >= 50)  add('idx', `EX指数${h.anaba.toFixed(0)}`, 2);
+        else if (h.anaba >= 15)  add('idx', `EX指数${h.anaba.toFixed(0)}`, 1);
+      }
+
+      // B. 騎手×厩舎コンボ（能力フロア必須）
+      if (abilityOk) {
+        if      (h.comboN >= 10 && h.comboPlaceRr >= 130)
+          add('combo', `騎×厩 複勝${h.comboPlaceRr.toFixed(0)}%（${h.comboN}戦）`, 3);
+        else if (h.comboN >= 7  && h.comboPlaceRr >= 110)
+          add('combo', `騎×厩 複勝${h.comboPlaceRr.toFixed(0)}%（${h.comboN}戦）`, 2);
+        else if (h.comboN >= 5  && h.comboPlaceRr >= 100)
+          add('combo', `騎×厩 複勝${h.comboPlaceRr.toFixed(0)}%（${h.comboN}戦）`, 1);
+      }
+
+      // C. 厩舎穴セグメント（能力フロア必須・穴馬のみ）
+      if (abilityOk && h.isAnaba) {
+        if      (h.kyushaN >= 10 && h.kyushaRr >= 130)
+          add('kyusha', `厩舎穴複勝${h.kyushaRr.toFixed(0)}%（${h.kyushaN}戦）`, 3);
+        else if (h.kyushaN >= 7  && h.kyushaRr >= 110)
+          add('kyusha', `厩舎穴複勝${h.kyushaRr.toFixed(0)}%（${h.kyushaN}戦）`, 2);
+      }
+
+      // D. 情報指数とオッズ乖離（ゲートなし。ただし能力フロアなしなら重みを半減）
+      if (h.joho !== null) {
+        const m = abilityOk ? 1 : 0.5;
+        if      (h.joho >= 7) add('joho', `情報印${h.joho}（最高水準）`, Math.round(3*m));
+        else if (h.joho >= 5) add('joho', `情報印${h.joho}`, Math.round(2*m));
+        else if (h.joho >= 3) add('joho', `情報印${h.joho}`, Math.round(1*m));
+        if (h.joho >= 5 && h.odds >= 5)
+          add('gap', `市場過小評価（情報印${h.joho}・${h.odds.toFixed(1)}倍）`, Math.round(2*m));
+      }
+
+      // E. 展開シナリオ（能力フロア必須）
+      if (abilityOk) {
+        if (fastPace && (h.style === '3' || h.style === '4')) {
+          if      (h.agariJuni <= 2) add('pace', `ハイペース×末脚${h.agariJuni}位`, 2);
+          else if (h.agariJuni <= 4) add('pace', `ハイペース向き(差・追)`, 1);
+        } else if (slowPace && (h.style === '1' || h.style === '2')) {
+          if      (h.tenJuni <= 2) add('pace', `スローペース×先行力${h.tenJuni}位`, 2);
+          else if (h.tenJuni <= 4) add('pace', `スローペース向き(逃・先)`, 1);
+        }
+      }
+
+      // 調教シグナル（能力フロア必須・相対ランクで判定）
+      // 矢印ダウンは能力フロアに関わらずペナルティ
+      if (h.yaji === '4' || h.yaji === '5') {
+        sc -= 2; // 表示タグは出さずスコアのみ減算
+      } else if (abilityOk) {
+        if (h.yaji === '1') add('chokyo', `調教矢印↑↑`, 2);
+        else if (h.yaji === '2') add('chokyo', `調教矢印↑`, 1);
+        // 追切はレース内上位25%のみ発火（絶対値ではなく相対評価）
+        const myOiRank = oiRankOf(h);
+        if (oiTop25Cutoff > 0 && myOiRank <= oiTop25Cutoff)
+          add('chokyo', `追切指数レース内${myOiRank}位`, 1);
+      }
+
+      // 展開予測順位（能力フロア必須）
+      if (abilityOk && h.goalJuni <= 2) add('goal', `展開予測${h.goalJuni}位通過`, 1);
+
+      return { sigs, sc, abilityOk };
+    }
+
+    const evaluated = horses.map(h => ({...h, ...evalHorse(h)}))
+      .sort((a,b) => b.sc - a.sc);
+
+    // 注目馬: 能力フロアを通過した馬のみ（単一シグナルで注目馬にならない）
+    const notable = evaluated.filter(h =>
+      h.abilityOk && h.sigs.filter(s => s.w > 0).length >= 2 && h.sc >= 3
+    );
+
+    // 指数軸（三連複構成用）
+    const honmeiAnchors = evaluated.filter(h => h.isHonmei && !isNaN(h.honmei) && h.honmei >= 30)
+      .sort((a,b) => b.honmei - a.honmei);
+    const anabaAnchors  = evaluated.filter(h => h.isAnaba  && !isNaN(h.anaba)  && h.anaba  >= 50)
+      .sort((a,b) => b.anaba - a.anaba);
+
+    // 注目馬なし
+    if (notable.length === 0 && honmeiAnchors.length === 0 && anabaAnchors.length === 0) {
+      inner.innerHTML = `<div style="font-size:.95rem;color:#6b7280;padding:8px 0">推奨買い目なし（複合シグナルが揃った馬が不在）</div>`;
+      wrap.style.display = '';
+      document.getElementById('budget-bar').style.display = 'none';
+      return;
+    }
+
+    function lbl(h) { return CIRCLE[h.umaNum-1] || `(${h.umaNum})`; }
+
+    // カテゴリ別タグ色
+    const CAT_STYLE = {
+      idx:    'background:#fef3c7;color:#92400e',
+      combo:  'background:#dbeafe;color:#1e40af',
+      kyusha: 'background:#d1fae5;color:#065f46',
+      joho:   'background:#fce7f3;color:#9d174d',
+      gap:    'background:#ffedd5;color:#c2410c',
+      pace:   'background:#ede9fe;color:#6d28d9',
+      chokyo: 'background:#ecfdf5;color:#047857',
+      goal:   'background:#f0f9ff;color:#0369a1',
+    };
+    function sigTag(s) {
+      const st = CAT_STYLE[s.cat] || 'background:#f3f4f6;color:#374151';
+      return `<span style="${st};border-radius:3px;padding:2px 7px;font-size:.82rem;white-space:nowrap">${s.text}</span>`;
+    }
+
+    // 点数計算ユーティリティ
+    function dedup(arr) {
+      const seen = new Set();
+      return arr.filter(h => { if(seen.has(h.umaNum)) return false; seen.add(h.umaNum); return true; });
+    }
+    function cnt2(a, b) {
+      const sa = new Set(a.map(h=>h.umaNum)), sb = new Set(b.map(h=>h.umaNum));
+      const s = new Set();
+      for (const x of sa) for (const y of sb) { if(x!==y) s.add([x,y].sort((a,b)=>a-b).join('-')); }
+      return s.size;
+    }
+    function cnt3(a, b, c) {
+      const sa = new Set(a.map(h=>h.umaNum)), sb = new Set(b.map(h=>h.umaNum)), sc = new Set(c.map(h=>h.umaNum));
+      const s = new Set();
+      for (const x of sa) for (const y of sb) for (const z of sc) {
+        if(x!==y && y!==z && x!==z) s.add([x,y,z].sort((a,b)=>a-b).join('-'));
+      }
+      return s.size;
+    }
+
+    // ── 描画 ──────────────────────────────────────────────
+    let html = `<div style="border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden;font-family:sans-serif;font-size:16px">
+      <div style="background:#1e3a5f;color:#fff;padding:9px 14px;font-size:1rem;font-weight:600;line-height:1.4;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+        <span>推奨買い目（複合シグナル分析）</span>
+        ${paceLabel ? `<span style="font-size:.8rem;font-weight:400;opacity:.85">${paceLabel}</span>` : ''}
+      </div>
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:16px">`;
+
+    // ─ セクション1: 注目馬カード ─────────────────────────
+    if (notable.length > 0) {
+      html += `<div>
+        <div style="font-size:.85rem;font-weight:700;color:#374151;border-bottom:1px solid #e5e7eb;padding-bottom:5px;margin-bottom:8px">注目馬（複合シグナル）</div>
+        <div style="display:flex;flex-direction:column;gap:8px">`;
+      for (const h of notable.slice(0, 7)) {
+        const styleStr = STYLE_LABEL[h.style] || '';
+        const yajiStr  = YAJI_LABEL[h.yaji]  || '';
+        const oddsStr  = h.odds >= 10 ? `${Math.round(h.odds)}倍` : `${h.odds.toFixed(1)}倍`;
+        const filled = Math.min(h.sc, 6);
+        const dots = '●'.repeat(filled) + '○'.repeat(6 - filled);
+        const scLabel = `${dots} <span style="font-size:.78rem;color:#6b7280">${h.sc}pt</span>`;
+        const borderColor = h.isHonmei ? '#f9a8d4' : '#6ee7b7';
+        html += `<div style="border-left:4px solid ${borderColor};padding:8px 10px;background:#fafafa;border-radius:0 6px 6px 0;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:1.2rem;font-weight:700">${lbl(h)}</span>
+            <span style="font-size:.95rem;color:#374151">${h.umaName}</span>
+            <span style="font-size:.85rem;color:#6b7280">${oddsStr}${styleStr ? ' / '+styleStr : ''}${yajiStr ? ' / 調教'+yajiStr : ''}</span>
+            <span style="font-size:.78rem;color:#9ca3af;letter-spacing:2px">${scLabel}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${h.sigs.map(sigTag).join('')}
+          </div>
+        </div>`;
+      }
+      html += `</div></div>`;
+    }
+
+    // ─ セクション2: 買い目 ──────────────────────────────
+
+    // --- 券種候補を事前計算 ---
+    const tanUma = notable.filter(h => (h.isHonmei && !isNaN(h.honmei) && h.honmei >= 50) || h.sc >= 7).slice(0,2);
+    const fukuUma = notable.filter(h => h.odds >= 3 && h.sigs.some(s => s.cat==='kyusha'||s.cat==='combo') && h.sc >= 4);
+
+    const umarenJiku = notable.length >= 2 ? [notable[0]] : [];
+    const umarenAite = notable.length >= 2 ? notable.slice(1, 5) : [];
+    const umarenPt   = umarenJiku.length > 0 ? cnt2(umarenJiku, umarenAite) : 0;
+
+    const wideGrp   = notable.slice(0, 3);
+    const widePt    = notable.length >= 2 ? cnt2(wideGrp.slice(0,1), wideGrp.slice(1,3)) : 0;
+    const wideMixed = wideGrp.some(h=>h.isHonmei) && wideGrp.some(h=>h.isAnaba);
+
+    const col1  = notable.length > 0 ? [notable[0]] : honmeiAnchors.slice(0,1).concat(anabaAnchors.slice(0,1));
+    const col2  = dedup([...notable.slice(0,3), ...honmeiAnchors.slice(0,2), ...anabaAnchors.slice(0,2)]).slice(0,4);
+    const col3  = dedup([...col2, ...notable, ...honmeiAnchors, ...anabaAnchors]).slice(0,7);
+    const triPt = (col1.length > 0 && col2.length > 0 && col3.length > 0) ? cnt3(col1, col2, col3) : 0;
+
+    // --- ダイナミック配分ウェイト ---
+    const top   = notable[0];
+    const sc0   = top ? top.sc : 0;
+    const sc1   = notable[1] ? notable[1].sc : 0;
+    const scGap = sc0 - sc1;
+
+    let wt = { tan: 2.0, fuku: 1.5, umaren: 2.5, wide: 2.0, sanrenfuku: 2.0 };
+
+    // 単勝: 支配的本命 → 重く、候補なし → 0
+    if (tanUma.length === 0) {
+      wt.tan = 0;
+    } else {
+      if (sc0 >= 8) wt.tan *= 1.6;
+      if (top && top.isHonmei && !isNaN(top.honmei) && top.honmei >= 60) wt.tan *= 1.3;
+      if (scGap >= 3) wt.tan *= 1.4;
+    }
+
+    // 複勝: 隠れシグナル馬の数・高オッズで重く、候補なし → 0
+    if (fukuUma.length === 0) {
+      wt.fuku = 0;
+    } else {
+      if (fukuUma.length >= 2) wt.fuku *= 1.3;
+      if (fukuUma.some(h => h.odds >= 20)) wt.fuku *= 1.3;
+    }
+
+    // 馬連: 軸明確なら重く、点数多すぎ → 軽く、候補なし → 0
+    if (umarenPt === 0) {
+      wt.umaren = 0;
+    } else {
+      if (scGap >= 4) wt.umaren *= 1.2;
+      if (umarenPt > 8) wt.umaren *= 0.7;
+    }
+
+    // ワイド: 本命×穴の混在が理想形 → 重く、候補なし → 0
+    if (widePt === 0) {
+      wt.wide = 0;
+    } else {
+      if (wideMixed) wt.wide *= 1.5;
+      else wt.wide *= 0.8;
+    }
+
+    // 三連複: 有効組み合わせなし → 0、点数多すぎ → 軽く
+    if (triPt === 0) {
+      wt.sanrenfuku = 0;
+    } else {
+      if (notable.length >= 4 && sc1 >= 5) wt.sanrenfuku *= 1.3;
+      if (triPt > 20) wt.sanrenfuku *= 0.6;
+    }
+
+    // --- 券種選定: 馬連・三連複を固定、残り1枠をウェイト最大の券種で埋める ---
+    const mandatoryKeys = [];
+    if (umarenPt > 0)  mandatoryKeys.push('umaren');
+    if (triPt > 0)     mandatoryKeys.push('sanrenfuku');
+
+    const optPool = [
+      { key: 'tan',  avail: tanUma.length > 0 },
+      { key: 'fuku', avail: fukuUma.length > 0 },
+      { key: 'wide', avail: widePt > 0 },
+    ].filter(x => x.avail).sort((a, b) => wt[b.key] - wt[a.key]);
+
+    const optSlots = Math.max(0, 3 - mandatoryKeys.length);
+    const optionalKeys = optPool.slice(0, optSlots).map(x => x.key);
+    const activeKeys = [...mandatoryKeys, ...optionalKeys];
+
+    // 選定した券種のみでウェイトを正規化
+    const totalWt = activeKeys.reduce((s, k) => s + wt[k], 0);
+    const ALLOC = {};
+    for (const k of Object.keys(wt))
+      ALLOC[k] = activeKeys.includes(k) && totalWt > 0 ? budget * wt[k] / totalWt : 0;
+
+    function yenPer(allocated, pts) {
+      if (!pts || pts <= 0) return 0;
+      return Math.max(100, Math.floor(allocated / pts / 100) * 100);
+    }
+
+    function betRow(label, pts, horses2d, note, allocated) {
+      let horseHtml = '';
+      if (horses2d.length === 1) {
+        horseHtml = horses2d[0].map(h => `<span style="font-size:1.15rem">${lbl(h)}</span>`).join('　');
+      } else {
+        horseHtml = horses2d.map((grp, i) =>
+          grp.map(h => `<span style="font-size:1.15rem${i===0?';font-weight:700':''}">${lbl(h)}</span>`).join('')
+          + (i < horses2d.length-1 ? `<span style="font-size:1rem;color:#9ca3af;margin:0 4px">×</span>` : '')
+        ).join('');
+      }
+      let yenBadge = '';
+      if (allocated && pts > 0) {
+        const per = yenPer(allocated, pts);
+        const total = per * pts;
+        yenBadge = `<span style="font-size:.82rem;font-weight:600;color:#dc2626;white-space:nowrap">${per.toLocaleString()}円×${pts}点＝${total.toLocaleString()}円</span>`;
+      }
+      return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">
+        <span style="font-size:.88rem;font-weight:700;background:#f3f4f6;padding:3px 10px;border-radius:4px;white-space:nowrap;flex-shrink:0">${label}　${pts}点</span>
+        ${yenBadge}
+        <span style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">${horseHtml}</span>
+        ${note ? `<span style="font-size:.82rem;color:#6b7280">${note}</span>` : ''}
+      </div>`;
+    }
+
+    // --- 描画（activeKeysに含まれる券種のみ） ---
+    html += `<div>
+      <div style="font-size:.85rem;font-weight:700;color:#374151;border-bottom:1px solid #e5e7eb;padding-bottom:5px;margin-bottom:8px">買い目</div>
+      <div style="display:flex;flex-direction:column;gap:10px">`;
+
+    if (activeKeys.includes('tan'))
+      html += betRow('単勝', tanUma.length, [tanUma],
+        `複合スコア${sc0}pt${top && top.isHonmei && !isNaN(top.honmei) ? '・本命指数'+top.honmei.toFixed(0) : ''}`,
+        ALLOC.tan);
+
+    if (activeKeys.includes('fuku'))
+      html += betRow('複勝', Math.min(fukuUma.length, 3), [fukuUma.slice(0,3)],
+        `騎×厩/厩舎穴シグナル`, ALLOC.fuku);
+
+    if (activeKeys.includes('umaren'))
+      html += betRow('馬連', umarenPt, [umarenJiku, umarenAite],
+        `${lbl(notable[0])}軸（スコア${sc0}pt）流し`, ALLOC.umaren);
+
+    if (activeKeys.includes('wide'))
+      html += betRow('ワイド', widePt, [wideGrp.slice(0,1), wideGrp.slice(1,3)],
+        wideMixed ? '本命×穴の高配当狙い' : 'スコア上位BOX', ALLOC.wide);
+
+    if (activeKeys.includes('sanrenfuku')) {
+      const triPer   = yenPer(ALLOC.sanrenfuku, triPt);
+      const triTotal = triPer * triPt;
+      html += `<div style="display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:.88rem;font-weight:700;background:#f3f4f6;padding:3px 10px;border-radius:4px;white-space:nowrap">三連複　${triPt}点</span>
+          <span style="font-size:.82rem;font-weight:600;color:#dc2626;white-space:nowrap">${triPer.toLocaleString()}円×${triPt}点＝${triTotal.toLocaleString()}円</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;margin-left:6px">
+          ${[['1列目', col1, true], ['2列目', col2, false], ['3列目', col3, false]].map(([rl, hs, bold]) =>
+            `<div style="display:flex;align-items:center;gap:10px">
+               <span style="font-size:.85rem;color:#6b7280;white-space:nowrap;min-width:3.2em">${rl}</span>
+               <span style="font-size:1.15rem${bold?';font-weight:700':''}">${hs.map(lbl).join('　')}</span>
+             </div>`
+          ).join('')}
+        </div>
+      </div>`;
+    }
+
+    html += `</div></div>`;
+    html += `</div></div>`;
+    inner.innerHTML = html;
+    wrap.style.display = '';
   }
 
   load();

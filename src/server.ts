@@ -8,12 +8,20 @@ import { pool } from './db/dbConnection';
 const ANABA_SQL_FILE    = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
 const TENKAI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'tenkai_index.sql');
 const PACEFIT_SQL_FILE  = path.join(__dirname, '..', 'sql', 'pacefit_index.sql');
+const HONMEI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'honmei_index.sql');
 
 const PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
   2: 'ファクトデータ投入 (T_ANABA_RACE_LOG)',
   3: 'ファクター集計 (T_ANABA_FACTOR_AGG)',
   4: '指数計算 (T_ANABA_SCORE)',
+};
+
+const HONMEI_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクトデータ投入 (T_HONMEI_RACE_LOG)',
+  3: 'ファクター集計 (T_HONMEI_FACTOR_AGG)',
+  4: '指数計算 (T_HONMEI_SCORE)',
 };
 
 const TENKAI_PART_LABELS: Record<number, string> = {
@@ -422,7 +430,23 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             ans.course_score  AS anaba_course_score,
             ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
             ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
-            ans.score_chokyo, ans.score_joshodo, ans.score_tekisei, ans.score_blood,
+            ans.score_chokyo, ans.score_kyusha, ans.score_kyakushitsu,
+            ans.score_joshodo, ans.score_tekisei, ans.score_blood,
+            hms.overall_score AS honmei_overall_score,
+            hms.course_score  AS honmei_course_score,
+            hms.score_ten     AS hms_score_ten,
+            hms.score_agari   AS hms_score_agari,
+            hms.score_ichi    AS hms_score_ichi,
+            hms.score_goal    AS hms_score_goal,
+            hms.score_combo   AS hms_score_combo,
+            hms.score_idm     AS hms_score_idm,
+            hms.score_joho    AS hms_score_joho,
+            hms.score_kyusha  AS hms_score_kyusha,
+            hms.score_chokyo  AS hms_score_chokyo,
+            hms.score_kyakushitsu AS hms_score_kyakushitsu,
+            hms.score_joshodo AS hms_score_joshodo,
+            hms.score_tekisei AS hms_score_tekisei,
+            hms.score_blood   AS hms_score_blood,
             pfs.overall_score AS pacefit_score,
             pfs.pace_yoso     AS pacefit_pace,
             s.order_of_finish AS result_order,
@@ -450,6 +474,10 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
        AND ans.kai = k.kai AND ans.day_code = k.day_code
        AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
+     LEFT JOIN T_HONMEI_SCORE hms
+       ON  hms.course_code = k.course_code AND hms.year_code = k.year_code
+       AND hms.kai = k.kai AND hms.day_code = k.day_code
+       AND hms.race_num = k.race_num AND hms.uma_num = k.uma_num
      LEFT JOIN T_PACEFIT_SCORE pfs
        ON  pfs.course_code = k.course_code AND pfs.year_code = k.year_code
        AND pfs.kai = k.kai AND pfs.day_code = k.day_code
@@ -1045,6 +1073,67 @@ app.post('/api/anaba-etl', (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// 本命指数 ETL: POST /api/honmei-etl
+// honmei_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/honmei-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  (async () => {
+    if (!fs.existsSync(HONMEI_SQL_FILE)) {
+      send('エラー: sql/honmei_index.sql が見つかりません', { error: true, done: true });
+      res.end(); return;
+    }
+    const sql = fs.readFileSync(HONMEI_SQL_FILE, 'utf-8');
+    const parts = splitSqlByParts(sql);
+
+    for (let i = 0; i < parts.length; i++) {
+      const partNum = i + 1;
+      const label = HONMEI_PART_LABELS[partNum] ?? `Part${partNum}`;
+      send(`[Part${partNum}] ${label} 開始...`);
+
+      let heartbeat: NodeJS.Timeout | undefined;
+      if (partNum === 4) {
+        let elapsed = 0;
+        heartbeat = setInterval(() => {
+          elapsed += 15;
+          send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
+        }, 15_000);
+      }
+
+      try {
+        await runMysqlSql(parts[i]);
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] ${label} 完了`);
+      } catch (err: any) {
+        if (heartbeat) clearInterval(heartbeat);
+        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        res.end(); return;
+      }
+    }
+
+    try {
+      const [[row]] = await pool.query<any>(
+        'SELECT COUNT(*) AS cnt FROM T_HONMEI_SCORE'
+      );
+      send(`完了: T_HONMEI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+    } catch { /* 無視 */ }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // 展開シナリオ指数 ETL: POST /api/tenkai-etl
 // tenkai_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
 // ────────────────────────────────────────────────────────────────────────────
@@ -1372,6 +1461,25 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`サーバー起動: http://localhost:${PORT}`);
+  // 本命指数テーブルが未作成の場合は空テーブルを作成（entries API の LEFT JOIN が失敗しないようにする）
+  pool.query(
+    `CREATE TABLE IF NOT EXISTS T_HONMEI_SCORE (
+      course_code CHAR(2) NOT NULL, year_code CHAR(2) NOT NULL,
+      kai CHAR(1) NOT NULL, day_code CHAR(1) NOT NULL,
+      race_num CHAR(2) NOT NULL, uma_num CHAR(2) NOT NULL,
+      overall_score DECIMAL(7,1) DEFAULT NULL,
+      course_score  DECIMAL(7,1) DEFAULT NULL,
+      score_ten DECIMAL(5,1) DEFAULT NULL, score_agari DECIMAL(5,1) DEFAULT NULL,
+      score_ichi DECIMAL(5,1) DEFAULT NULL, score_goal DECIMAL(5,1) DEFAULT NULL,
+      score_combo DECIMAL(5,1) DEFAULT NULL, score_idm DECIMAL(5,1) DEFAULT NULL,
+      score_joho DECIMAL(5,1) DEFAULT NULL, score_kyusha DECIMAL(5,1) DEFAULT NULL,
+      score_chokyo DECIMAL(5,1) DEFAULT NULL, score_kyakushitsu DECIMAL(5,1) DEFAULT NULL,
+      score_joshodo DECIMAL(5,1) DEFAULT NULL, score_tekisei DECIMAL(5,1) DEFAULT NULL,
+      score_blood DECIMAL(5,1) DEFAULT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  ).catch(() => {});
   // デフォルト年範囲のキャッシュを起動直後にバックグラウンドで生成
   setTimeout(() => {
     fetch(`http://localhost:${PORT}/api/jockey-ninki-stats?yearFrom=2020&yearTo=2026&minRides=1`)
