@@ -5,6 +5,8 @@
     { href: '/jockey.html',       label: '騎手能力' },
     { href: '/jockey-ninki.html', label: '騎手×人気偏差' },
     { href: '/course.html',       label: 'コース別傾向' },
+    { href: '/factor-recovery.html', label: '指数帯別回収率' },
+    { href: '/watchlist.html',    label: 'ウォッチリスト' },
     { href: '/download.html', label: 'データ取込' },
     { href: '/stats.html',    label: 'データ確認' },
   ];

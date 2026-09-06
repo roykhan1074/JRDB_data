@@ -5,10 +5,26 @@ import * as fs from 'fs';
 import { runPipeline, PrefixName } from './pipeline';
 import { pool } from './db/dbConnection';
 
+// プロセス全体のセーフティネット。
+// ETL系エンドポイント（SSEで進捗をres.writeし続ける実装）は、クライアントが途中で
+// 切断した後にres.writeを呼ぶと書き込みエラーが発生しうる。個別にtry/catchしていない
+// 箇所でこれが未捕捉例外・未処理rejectionになるとNode.jsプロセス自体が終了してしまい、
+// 実行中の子プロセス（mysql CLI）も巻き添えで終了し、ETLがTRUNCATE直後の空テーブル状態
+// のまま放置される（実際に発生した事故）。開発サーバーが丸ごと落ちることだけは避けるため、
+// 最後の砦としてログ出力のみ行い、プロセスは継続させる。
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException] サーバーは継続します:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[unhandledRejection] サーバーは継続します:', err);
+});
+
 const ANABA_SQL_FILE    = path.join(__dirname, '..', 'sql', 'anaba_index.sql');
 const TENKAI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'tenkai_index.sql');
 const PACEFIT_SQL_FILE  = path.join(__dirname, '..', 'sql', 'pacefit_index.sql');
 const HONMEI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'honmei_index.sql');
+const COURSE_RECOVERY_SQL_FILE = path.join(__dirname, '..', 'sql', 'course_recovery_index.sql');
+const BLINKER_SQL_FILE = path.join(__dirname, '..', 'sql', 'blinker_index.sql');
 
 const PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
@@ -36,6 +52,18 @@ const PACEFIT_PART_LABELS: Record<number, string> = {
   2: '全体ファクター集計 (T_PACEFIT_FACTOR_AGG)',
   3: 'コース別ファクター集計 (T_PACEFIT_FACTOR_AGG)',
   4: '指数計算 (T_PACEFIT_SCORE)',
+};
+
+const COURSE_RECOVERY_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: '全体ファクター集計 (T_COURSE_RECOVERY_FACTOR_AGG)',
+  3: '指数計算 (T_COURSE_RECOVERY_SCORE)',
+};
+
+const BLINKER_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクター集計 (T_BLINKER_FACTOR_AGG)',
+  3: '指数計算 (T_BLINKER_SCORE)',
 };
 
 /** SQLファイルを -- Part N: マーカーで4パートに分割 */
@@ -68,18 +96,34 @@ function runMysqlSql(sql: string): Promise<void> {
     ];
     const proc = spawn('mysql', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let stderr = '';
+    let settled = false;
+    // stdoutを読み捨てないと、SELECT結果が多いSQL（診断クエリ等）でOSパイプバッファが
+    // 満杯になりmysqlプロセスがwriteでブロックし続け、closeイベントが永久に発火しない
+    // （＝ETLがハングしたまま完了報告もエラー報告もされない）事故につながる。
+    proc.stdout.on('data', () => { /* 破棄。ログはmysql CLI標準出力を見ない運用のため不要 */ });
     proc.stderr.on('data', (d: Buffer) => {
       const s = d.toString();
       if (!s.includes('[Warning] Using a password')) stderr += s;
     });
+    proc.on('error', (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`mysql起動失敗: ${err.message}`));
+    });
     proc.on('close', (code: number | null) => {
+      if (settled) return;
+      settled = true;
       if (code === 0) resolve();
       else reject(new Error(stderr.trim() || `mysql exit code ${code}`));
     });
+    proc.stdin.on('error', () => { /* proc.on('error')側でreject済み */ });
     proc.stdin.write(sql, 'utf8');
     proc.stdin.end();
   });
 }
+
+/** ETL多重実行防止用ロック。同じ指数のETLが実行中は次のリクエストを即エラーにする。 */
+const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false };
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -162,6 +206,7 @@ const TABLE_META = [
   { table: 'T_SED', label: '成績データ',       prefix: 'SED', dateCol: 'ymd' },
   { table: 'T_UKC', label: '馬マスタ',         prefix: 'UKC', dateCol: 'data_ymd' },
   { table: 'T_SRB', label: '成績速報',         prefix: 'SRB', dateCol: 'load_date' },
+  { table: 'T_HJC', label: '払戻データ',       prefix: 'HJC', dateCol: 'load_date' },
 ];
 
 app.get('/api/stats', async (_req, res) => {
@@ -413,6 +458,7 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             k.kishu_name, k.trainer_name,
             k.kishu_code, k.trainer_code,
             k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
+            bls.grade AS blinker_grade,
             k.chokyo_yajirushi,
             k.nyukyu_nichi_mae,
             k.hohbokusaki_rank,
@@ -425,6 +471,9 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             cr.place_recovery AS combo_place_rr,
             cr.total_count    AS combo_n,
             kya.anaba_place_rr  AS kyusha_anaba_place_rr,
+            kya.anaba_win_rr    AS kyusha_anaba_win_rr,
+            kya.anaba_win_rate  AS kyusha_anaba_win_rate,
+            kya.anaba_place_rate AS kyusha_anaba_place_rate,
             kya.anaba_n         AS kyusha_anaba_n,
             ans.overall_score AS anaba_overall_score,
             ans.course_score  AS anaba_course_score,
@@ -432,6 +481,8 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             ans.score_combo, ans.score_idm, ans.score_gekiso, ans.score_manbaken,
             ans.score_chokyo, ans.score_kyusha, ans.score_kyakushitsu,
             ans.score_joshodo, ans.score_tekisei, ans.score_blood,
+            ans.score_ten_c, ans.score_agari_c, ans.score_ichi_c, ans.score_goal_c,
+            ans.score_combo_c, ans.score_kyakushitsu_c, ans.score_blood_c,
             hms.overall_score AS honmei_overall_score,
             hms.course_score  AS honmei_course_score,
             hms.score_ten     AS hms_score_ten,
@@ -447,8 +498,16 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             hms.score_joshodo AS hms_score_joshodo,
             hms.score_tekisei AS hms_score_tekisei,
             hms.score_blood   AS hms_score_blood,
+            hms.score_ten_c         AS hms_score_ten_c,
+            hms.score_agari_c       AS hms_score_agari_c,
+            hms.score_ichi_c        AS hms_score_ichi_c,
+            hms.score_goal_c        AS hms_score_goal_c,
+            hms.score_combo_c       AS hms_score_combo_c,
+            hms.score_kyakushitsu_c AS hms_score_kyakushitsu_c,
+            hms.score_blood_c       AS hms_score_blood_c,
             pfs.overall_score AS pacefit_score,
             pfs.pace_yoso     AS pacefit_pace,
+            mm.mark           AS my_mark,
             s.order_of_finish AS result_order,
             s.win             AS result_win,
             s.place           AS result_place,
@@ -464,6 +523,9 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
      LEFT JOIN (
        SELECT trainer_code,
               ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
+              ROUND(SUM(win_payout_sum)   / SUM(total_count), 1) AS anaba_win_rr,
+              ROUND(SUM(win_count)   / SUM(total_count) * 100, 1) AS anaba_win_rate,
+              ROUND(SUM(place_count) / SUM(total_count) * 100, 1) AS anaba_place_rate,
               SUM(total_count)                                    AS anaba_n
        FROM T_KYUSHA_FACTOR_AGG
        WHERE factor_type = 'kyusha_idx_x_odds'
@@ -482,6 +544,14 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        ON  pfs.course_code = k.course_code AND pfs.year_code = k.year_code
        AND pfs.kai = k.kai AND pfs.day_code = k.day_code
        AND pfs.race_num = k.race_num AND pfs.uma_num = k.uma_num
+     LEFT JOIN T_BLINKER_SCORE bls
+       ON  bls.course_code = k.course_code AND bls.year_code = k.year_code
+       AND bls.kai = k.kai AND bls.day_code = k.day_code
+       AND bls.race_num = k.race_num AND bls.uma_num = k.uma_num
+     LEFT JOIN T_MY_MARK mm
+       ON  mm.course_code = k.course_code AND mm.year_code = k.year_code
+       AND mm.kai = k.kai AND mm.day_code = k.day_code
+       AND mm.race_num = k.race_num AND mm.uma_num = k.uma_num
      LEFT JOIN T_SED s
        ON  s.course_code = k.course_code AND s.year_code = k.year_code
        AND s.kai = k.kai AND s.day_code = k.day_code
@@ -491,6 +561,51 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
     [course_code, year_code, kai, day_code, race_num]
   );
   res.json({ source: 'entries', rows });
+});
+
+// 自分の予想印 保存/削除: POST /api/races/:raceKey/marks  body: { uma_num, mark }
+// mark が空/null の場合は削除（未設定に戻す）
+app.post('/api/races/:raceKey/marks', async (req, res) => {
+  const { raceKey } = req.params;
+  if (!/^\d{5}[0-9a-f]\d{2}$/i.test(raceKey)) {
+    res.status(400).json({ error: '無効なレースキーです' });
+    return;
+  }
+  const { uma_num, mark } = req.body as { uma_num?: string; mark?: string | null };
+  if (!uma_num || !/^\d{1,2}$/.test(uma_num)) {
+    res.status(400).json({ error: '馬番が不正です' });
+    return;
+  }
+  const course_code = raceKey.slice(0, 2);
+  const year_code   = raceKey.slice(2, 4);
+  const kai         = raceKey.slice(4, 5);
+  const day_code    = raceKey.slice(5, 6);
+  const race_num    = raceKey.slice(6, 8);
+  const umaNumPadded = uma_num.padStart(2, '0');
+
+  try {
+    if (!mark) {
+      await pool.query(
+        `DELETE FROM T_MY_MARK WHERE course_code=? AND year_code=? AND kai=? AND day_code=? AND race_num=? AND uma_num=?`,
+        [course_code, year_code, kai, day_code, race_num, umaNumPadded]
+      );
+      res.json({ ok: true });
+      return;
+    }
+    if (!/^[1-6]$/.test(mark)) {
+      res.status(400).json({ error: '印の値が不正です' });
+      return;
+    }
+    await pool.query(
+      `INSERT INTO T_MY_MARK (course_code, year_code, kai, day_code, race_num, uma_num, mark)
+       VALUES (?,?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE mark = VALUES(mark)`,
+      [course_code, year_code, kai, day_code, race_num, umaNumPadded, mark]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -541,6 +656,12 @@ const AGGREGATE_MAP: Record<string, { selectSql: string; groupSql: string; order
   ex_course:   { alias: 'EX指数コース帯',
                  groupSql: "CASE WHEN ans.course_score IS NULL THEN '—' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 20 THEN '0~20' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 50 THEN '20~50' WHEN CAST(ans.course_score AS DECIMAL(7,1)) < 100 THEN '50~100' ELSE '100~' END",
                  orderSql: "MIN(CAST(COALESCE(ans.course_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
+  honmei_overall: { alias: '本命指数全体帯',
+                 groupSql: "CASE WHEN hms.overall_score IS NULL THEN '—' WHEN CAST(hms.overall_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(hms.overall_score AS DECIMAL(7,1)) < 15 THEN '0~15' WHEN CAST(hms.overall_score AS DECIMAL(7,1)) < 30 THEN '15~30' WHEN CAST(hms.overall_score AS DECIMAL(7,1)) < 50 THEN '30~50' ELSE '50~' END",
+                 orderSql: "MIN(CAST(COALESCE(hms.overall_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
+  honmei_course:  { alias: '本命指数コース帯',
+                 groupSql: "CASE WHEN hms.course_score IS NULL THEN '—' WHEN CAST(hms.course_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(hms.course_score AS DECIMAL(7,1)) < 15 THEN '0~15' WHEN CAST(hms.course_score AS DECIMAL(7,1)) < 30 THEN '15~30' WHEN CAST(hms.course_score AS DECIMAL(7,1)) < 50 THEN '30~50' ELSE '50~' END",
+                 orderSql: "MIN(CAST(COALESCE(hms.course_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
   tenkai:      { alias: '展開指数帯',
                  groupSql: "CASE WHEN pfs.overall_score IS NULL THEN '—' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 0 THEN '<0' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 15 THEN '0~15' WHEN CAST(pfs.overall_score AS DECIMAL(7,1)) < 25 THEN '15~25' ELSE '25~' END",
                  orderSql: "MIN(CAST(COALESCE(pfs.overall_score, -99999) AS DECIMAL(7,1)))", selectSql: "" },
@@ -598,6 +719,12 @@ const AGGREGATE_MAP_FACT: Record<string, { selectSql: string; groupSql: string; 
   ex_course:   { alias: 'EX指数コース帯',
                  groupSql: "CASE WHEN f.ex_course IS NULL THEN '—' WHEN f.ex_course < 0 THEN '<0' WHEN f.ex_course < 20 THEN '0~20' WHEN f.ex_course < 50 THEN '20~50' WHEN f.ex_course < 100 THEN '50~100' ELSE '100~' END",
                  orderSql: "MIN(COALESCE(f.ex_course, -99999))", selectSql: "" },
+  honmei_overall: { alias: '本命指数全体帯',
+                 groupSql: "CASE WHEN f.honmei_overall IS NULL THEN '—' WHEN f.honmei_overall < 0 THEN '<0' WHEN f.honmei_overall < 15 THEN '0~15' WHEN f.honmei_overall < 30 THEN '15~30' WHEN f.honmei_overall < 50 THEN '30~50' ELSE '50~' END",
+                 orderSql: "MIN(COALESCE(f.honmei_overall, -99999))", selectSql: "" },
+  honmei_course:  { alias: '本命指数コース帯',
+                 groupSql: "CASE WHEN f.honmei_course IS NULL THEN '—' WHEN f.honmei_course < 0 THEN '<0' WHEN f.honmei_course < 15 THEN '0~15' WHEN f.honmei_course < 30 THEN '15~30' WHEN f.honmei_course < 50 THEN '30~50' ELSE '50~' END",
+                 orderSql: "MIN(COALESCE(f.honmei_course, -99999))", selectSql: "" },
   tenkai:      { alias: '展開指数帯',
                  groupSql: "CASE WHEN f.tenkai_score IS NULL THEN '—' WHEN f.tenkai_score < 0 THEN '<0' WHEN f.tenkai_score < 15 THEN '0~15' WHEN f.tenkai_score < 25 THEN '15~25' ELSE '25~' END",
                  orderSql: "MIN(COALESCE(f.tenkai_score, -99999))", selectSql: "" },
@@ -629,6 +756,8 @@ app.post('/api/analyze', async (req, res) => {
     chokyo_sp_from, chokyo_sp_to,
     ex_overall_from, ex_overall_to,
     ex_course_from, ex_course_to,
+    honmei_overall_from, honmei_overall_to,
+    honmei_course_from, honmei_course_to,
     tenkai_from, tenkai_to,
     kishu, trainer, umanushi,
     aggregate_01, aggregate_02, aggregate_03,
@@ -687,6 +816,8 @@ app.post('/api/analyze', async (req, res) => {
     if (shiage_from && shiage_to)         { sql += ' AND f.shiage_index BETWEEN ? AND ?';      params.push(shiage_from, shiage_to); }
     if (ex_overall_from && ex_overall_to) { sql += ' AND f.ex_overall BETWEEN ? AND ?';       params.push(ex_overall_from, ex_overall_to); }
     if (ex_course_from  && ex_course_to)  { sql += ' AND f.ex_course BETWEEN ? AND ?';        params.push(ex_course_from, ex_course_to); }
+    if (honmei_overall_from && honmei_overall_to) { sql += ' AND f.honmei_overall BETWEEN ? AND ?'; params.push(honmei_overall_from, honmei_overall_to); }
+    if (honmei_course_from  && honmei_course_to)  { sql += ' AND f.honmei_course BETWEEN ? AND ?';  params.push(honmei_course_from, honmei_course_to); }
     if (tenkai_from && tenkai_to)         { sql += ' AND f.tenkai_score BETWEEN ? AND ?';      params.push(tenkai_from, tenkai_to); }
     if (chokyo_sp_from && chokyo_sp_to) {
       const gr = (g: string) => g === 'A' ? 1 : g === 'B' ? 2 : g === 'C' ? 3 : g === 'D' ? 4 : g === 'E' ? 5 : null;
@@ -815,6 +946,10 @@ sp_cte AS (
     || !!(ex_overall_from && ex_overall_to)
     || !!(ex_course_from  && ex_course_to);
 
+  const needsHms = aggKeys.some(k => k === 'honmei_overall' || k === 'honmei_course')
+    || !!(honmei_overall_from && honmei_overall_to)
+    || !!(honmei_course_from  && honmei_course_to);
+
   const needsPfs = aggKeys.includes('tenkai')
     || !!(tenkai_from && tenkai_to);
 
@@ -830,6 +965,13 @@ sp_cte AS (
       ON  k.course_code = ans.course_code AND k.year_code = ans.year_code
       AND k.kai = ans.kai AND k.day_code = ans.day_code
       AND k.race_num = ans.race_num AND k.uma_num = ans.uma_num`
+    : '';
+
+  const hmsJoin = needsHms
+    ? `LEFT JOIN T_HONMEI_SCORE hms
+      ON  k.course_code = hms.course_code AND k.year_code = hms.year_code
+      AND k.kai = hms.kai AND k.day_code = hms.day_code
+      AND k.race_num = hms.race_num AND k.uma_num = hms.uma_num`
     : '';
 
   const pfsJoin = needsPfs
@@ -856,6 +998,7 @@ sp_cte AS (
       AND fin.ijou_kubun IN ('0','')
     ${cybJoin}
     ${ansJoin}
+    ${hmsJoin}
     ${pfsJoin}
     ${spCteJoin}
     WHERE 1=1
@@ -886,6 +1029,8 @@ sp_cte AS (
   if (shiage_from && shiage_to)     { sql += ' AND CAST(c.shiage_index   AS UNSIGNED)     BETWEEN ? AND ?'; params.push(shiage_from, shiage_to); }
   if (ex_overall_from && ex_overall_to) { sql += ' AND CAST(ans.overall_score AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(ex_overall_from, ex_overall_to); }
   if (ex_course_from  && ex_course_to)  { sql += ' AND CAST(ans.course_score  AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(ex_course_from, ex_course_to); }
+  if (honmei_overall_from && honmei_overall_to) { sql += ' AND CAST(hms.overall_score AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(honmei_overall_from, honmei_overall_to); }
+  if (honmei_course_from  && honmei_course_to)  { sql += ' AND CAST(hms.course_score  AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(honmei_course_from, honmei_course_to); }
   if (tenkai_from && tenkai_to)         { sql += ' AND CAST(pfs.overall_score  AS DECIMAL(7,1)) BETWEEN ? AND ?'; params.push(tenkai_from, tenkai_to); }
   if (chokyo_sp_from && chokyo_sp_to) {
     const gr = (g: string) => g === 'A' ? 1 : g === 'B' ? 2 : g === 'C' ? 3 : g === 'D' ? 4 : g === 'E' ? 5 : null;
@@ -1010,6 +1155,405 @@ app.get('/api/course-analysis', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// 指数帯別回収率API: EX指数帯・本命指数帯・厩指穴信頼グレード別の回収率集計
+// ────────────────────────────────────────────────────────────────────────────
+
+let factorRecoveryCache: { exIndex: any[]; honmeiIndex: any[]; kyushaTrust: any[]; courseRecovery: any[]; blinkerIndex: any[]; updatedAt: string } | null = null;
+
+async function computeFactorRecovery() {
+  const rateSelect = `
+    COUNT(*) AS total_count,
+    SUM(win_flag)    AS win_count,
+    SUM(renso_flag)  AS renso_count,
+    SUM(place_flag)  AS place_count,
+    ROUND(SUM(win_flag)   / COUNT(*) * 100, 1) AS win_rate,
+    ROUND(SUM(renso_flag) / COUNT(*) * 100, 1) AS renso_rate,
+    ROUND(SUM(place_flag) / COUNT(*) * 100, 1) AS place_rate,
+    ROUND(SUM(win_pay)   / COUNT(*), 1) AS win_recovery,
+    ROUND(SUM(place_pay) / COUNT(*), 1) AS place_recovery
+  `;
+
+  // ── EX指数帯（穴馬指数・基準オッズ≧10倍の馬のみ対象）──
+  const [exRows] = await pool.query<any>(
+    `SELECT band_key, band_label, ${rateSelect}
+     FROM (
+       SELECT
+         CASE
+           WHEN ex_course < 0    THEN '1'
+           WHEN ex_course < 15   THEN '2'
+           WHEN ex_course < 50   THEN '3'
+           WHEN ex_course < 100  THEN '4'
+           ELSE '5'
+         END AS band_key,
+         CASE
+           WHEN ex_course < 0    THEN '0未満'
+           WHEN ex_course < 15   THEN '0〜15'
+           WHEN ex_course < 50   THEN '15〜50'
+           WHEN ex_course < 100  THEN '50〜100'
+           ELSE '100以上'
+         END AS band_label,
+         (order_of_finish = 1)      AS win_flag,
+         (order_of_finish <= 2)     AS renso_flag,
+         (order_of_finish <= 3)     AS place_flag,
+         COALESCE(win_pay, 0)   AS win_pay,
+         COALESCE(place_pay, 0) AS place_pay
+       FROM T_ANALYZE_FACT
+       WHERE ex_course IS NOT NULL AND kijun_odds >= 10.0 AND order_of_finish IS NOT NULL
+     ) t
+     GROUP BY band_key, band_label
+     ORDER BY band_key`
+  );
+
+  // ── 本命指数帯（基準オッズ＜10倍の馬のみ対象）──
+  const [honmeiRows] = await pool.query<any>(
+    `SELECT band_key, band_label, ${rateSelect}
+     FROM (
+       SELECT
+         CASE
+           WHEN honmei_course < 0   THEN '1'
+           WHEN honmei_course < 10  THEN '2'
+           WHEN honmei_course < 30  THEN '3'
+           WHEN honmei_course < 50  THEN '4'
+           ELSE '5'
+         END AS band_key,
+         CASE
+           WHEN honmei_course < 0   THEN '0未満'
+           WHEN honmei_course < 10  THEN '0〜10'
+           WHEN honmei_course < 30  THEN '10〜30'
+           WHEN honmei_course < 50  THEN '30〜50'
+           ELSE '50以上'
+         END AS band_label,
+         (order_of_finish = 1)      AS win_flag,
+         (order_of_finish <= 2)     AS renso_flag,
+         (order_of_finish <= 3)     AS place_flag,
+         COALESCE(win_pay, 0)   AS win_pay,
+         COALESCE(place_pay, 0) AS place_pay
+       FROM T_ANALYZE_FACT
+       WHERE honmei_course IS NOT NULL AND kijun_odds > 0 AND kijun_odds < 10.0 AND order_of_finish IS NOT NULL
+     ) t
+     GROUP BY band_key, band_label
+     ORDER BY band_key`
+  );
+
+  // ── 厩指穴信頼グレード（厩舎指数≧0×基準オッズ≧15倍セグメントでの厩舎別信頼度）──
+  // 1) 厩舎ごとに当該セグメントの成績を集計 → 2) 複勝回収率でグレード判定 → 3) グレードごとに再集計
+  const [kyushaRows] = await pool.query<any>(
+    `WITH trainer_stats AS (
+       SELECT trainer_code,
+              COUNT(*) AS n,
+              SUM(finish_order = '01')                    AS win_flag,
+              SUM(finish_order IN ('01','02'))             AS renso_flag,
+              SUM(finish_order IN ('01','02','03'))        AS place_flag,
+              SUM(CASE WHEN ijou_kubun IN ('0','') THEN COALESCE(win_payout,0)   ELSE 0 END) AS win_pay,
+              SUM(CASE WHEN ijou_kubun IN ('0','') THEN COALESCE(place_payout,0) ELSE 0 END) AS place_pay
+       FROM T_KYUSHA_RACE_LOG
+       WHERE kyusha_index >= 0 AND kijun_odds >= 15
+       GROUP BY trainer_code
+     ),
+     graded AS (
+       SELECT *,
+         CASE
+           WHEN n < 20 THEN NULL
+           WHEN (place_pay / n) >= 130 THEN 'S'
+           WHEN (place_pay / n) >= 110 THEN 'A'
+           WHEN (place_pay / n) >= 100 THEN 'B'
+           WHEN (place_pay / n) >= 90  THEN 'C'
+           WHEN (place_pay / n) >= 80  THEN 'D'
+           WHEN (place_pay / n) >= 60  THEN 'E'
+           ELSE 'F'
+         END AS grade
+       FROM trainer_stats
+     )
+     SELECT grade AS band_key, grade AS band_label,
+            COUNT(*)      AS trainer_count,
+            SUM(n)        AS total_count,
+            SUM(win_flag)   AS win_count,
+            SUM(renso_flag) AS renso_count,
+            SUM(place_flag) AS place_count,
+            ROUND(SUM(win_flag)   / SUM(n) * 100, 1) AS win_rate,
+            ROUND(SUM(renso_flag) / SUM(n) * 100, 1) AS renso_rate,
+            ROUND(SUM(place_flag) / SUM(n) * 100, 1) AS place_rate,
+            ROUND(SUM(win_pay)   / SUM(n), 1) AS win_recovery,
+            ROUND(SUM(place_pay) / SUM(n), 1) AS place_recovery
+     FROM graded
+     WHERE grade IS NOT NULL
+     GROUP BY grade
+     ORDER BY FIELD(grade, 'S','A','B','C','D','E','F')`
+  );
+
+  // ── コース回収率指数帯（ハイブリッド版。設計: document/分析レポート/コース回収率指数_設計とバックテストレポート.md）──
+  // T_COURSE_RECOVERY_SCORE が未構築（ETL未実行）の環境でも他の指数帯表示が壊れないようtry/catchで保護する
+  let courseRecoveryRows: any[] = [];
+  try {
+  [courseRecoveryRows] = await pool.query<any>(
+    `SELECT band_key, band_label, ${rateSelect}
+     FROM (
+       SELECT
+         CASE
+           WHEN s.score >= 30  THEN '1'
+           WHEN s.score >= 20  THEN '2'
+           WHEN s.score >= 10  THEN '3'
+           WHEN s.score >= 0   THEN '4'
+           WHEN s.score >= -10 THEN '5'
+           WHEN s.score >= -20 THEN '6'
+           ELSE '7'
+         END AS band_key,
+         CASE
+           WHEN s.score >= 30  THEN '30以上'
+           WHEN s.score >= 20  THEN '20〜29'
+           WHEN s.score >= 10  THEN '10〜19'
+           WHEN s.score >= 0   THEN '0〜9'
+           WHEN s.score >= -10 THEN '-1〜-10'
+           WHEN s.score >= -20 THEN '-11〜-20'
+           ELSE '-21以下'
+         END AS band_label,
+         (f.order_of_finish = 1)      AS win_flag,
+         (f.order_of_finish <= 2)     AS renso_flag,
+         (f.order_of_finish <= 3)     AS place_flag,
+         COALESCE(f.win_pay, 0)   AS win_pay,
+         COALESCE(f.place_pay, 0) AS place_pay
+       FROM T_COURSE_RECOVERY_SCORE s
+       INNER JOIN T_ANALYZE_FACT f
+         ON  f.course_code=s.course_code AND f.year_code=s.year_code AND f.kai=s.kai
+         AND f.day_code=s.day_code AND f.race_num=s.race_num AND f.uma_num=s.uma_num
+       WHERE s.score IS NOT NULL AND f.order_of_finish IS NOT NULL
+     ) t
+     GROUP BY band_key, band_label
+     ORDER BY band_key`
+  );
+  } catch { /* T_COURSE_RECOVERY_SCORE 未構築の場合は空配列のまま */ }
+
+  // ── ブリンカー指数グレード別（設計: document/分析レポート/ブリンカー指数_仕様書.md）──
+  // バックテストにより連続値としての中間解像度は低いことが判明しているため、A/B/C の3段階グレードのみ集計する
+  let blinkerIndexRows: any[] = [];
+  try {
+  [blinkerIndexRows] = await pool.query<any>(
+    `SELECT band_key, band_label, ${rateSelect}
+     FROM (
+       SELECT
+         CONCAT(s.blinker_type, s.grade) AS band_key,
+         CONCAT(CASE WHEN s.blinker_type='1' THEN '初装着' ELSE '再装着' END, ' ',
+                CASE s.grade WHEN 'A' THEN 'A(高評価)' WHEN 'C' THEN 'C(低評価)' ELSE 'B(中立)' END) AS band_label,
+         (f.order_of_finish = 1)      AS win_flag,
+         (f.order_of_finish <= 2)     AS renso_flag,
+         (f.order_of_finish <= 3)     AS place_flag,
+         COALESCE(f.win_pay, 0)   AS win_pay,
+         COALESCE(f.place_pay, 0) AS place_pay
+       FROM T_BLINKER_SCORE s
+       INNER JOIN T_ANALYZE_FACT f
+         ON  f.course_code=s.course_code AND f.year_code=s.year_code AND f.kai=s.kai
+         AND f.day_code=s.day_code AND f.race_num=s.race_num AND f.uma_num=s.uma_num
+       WHERE f.order_of_finish IS NOT NULL
+     ) t
+     GROUP BY band_key, band_label
+     ORDER BY band_key`
+  );
+  } catch { /* T_BLINKER_SCORE 未構築の場合は空配列のまま */ }
+
+  return {
+    exIndex: exRows as any[],
+    honmeiIndex: honmeiRows as any[],
+    kyushaTrust: kyushaRows as any[],
+    courseRecovery: courseRecoveryRows as any[],
+    blinkerIndex: blinkerIndexRows as any[],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// GET /api/factor-recovery: キャッシュがあれば即返す（初回のみDB集計、数秒かかる）
+app.get('/api/factor-recovery', async (_req, res) => {
+  if (!factorRecoveryCache) {
+    factorRecoveryCache = await computeFactorRecovery();
+  }
+  res.json(factorRecoveryCache);
+});
+
+// POST /api/factor-recovery/refresh: 明示的に再集計（新データ取込後に押す想定）
+app.post('/api/factor-recovery/refresh', async (_req, res) => {
+  factorRecoveryCache = await computeFactorRecovery();
+  trainerGradeCache = null; // ウォッチリストの厩指穴信頼グレードも合わせて再計算させる
+  res.json(factorRecoveryCache);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ウォッチリスト: 指定開催日で「一番人気以外の本命指数(コース)50以上」「EX指数(コース)50以上」
+// 「厩指穴信頼ランクS〜C」のいずれかに該当する馬を抽出する
+// ────────────────────────────────────────────────────────────────────────────
+
+let trainerGradeCache: Record<string, string> | null = null;
+
+async function getTrainerGradeMap(): Promise<Record<string, string>> {
+  if (trainerGradeCache) return trainerGradeCache;
+  const [rows] = await pool.query<any>(
+    `WITH trainer_stats AS (
+       SELECT trainer_code,
+              COUNT(*) AS n,
+              SUM(CASE WHEN ijou_kubun IN ('0','') THEN COALESCE(place_payout,0) ELSE 0 END) AS place_pay
+       FROM T_KYUSHA_RACE_LOG
+       WHERE kyusha_index >= 0 AND kijun_odds >= 15
+       GROUP BY trainer_code
+     )
+     SELECT trainer_code,
+       CASE
+         WHEN (place_pay / n) >= 130 THEN 'S'
+         WHEN (place_pay / n) >= 110 THEN 'A'
+         WHEN (place_pay / n) >= 100 THEN 'B'
+         WHEN (place_pay / n) >= 90  THEN 'C'
+         WHEN (place_pay / n) >= 80  THEN 'D'
+         WHEN (place_pay / n) >= 60  THEN 'E'
+         ELSE 'F'
+       END AS grade
+     FROM trainer_stats
+     WHERE n >= 20`
+  );
+  const map: Record<string, string> = {};
+  for (const r of rows as any[]) map[r.trainer_code] = r.grade;
+  trainerGradeCache = map;
+  return map;
+}
+
+// GET /api/watchlist?ymd=YYYYMMDD
+app.get('/api/watchlist', async (req, res) => {
+  const { ymd } = req.query as Record<string, string>;
+  if (!ymd || !/^\d{8}$/.test(ymd)) {
+    res.status(400).json({ error: 'ymd は YYYYMMDD 形式で指定してください' });
+    return;
+  }
+
+  const gradeMap = await getTrainerGradeMap();
+
+  const [rows] = await pool.query<any>(
+    `SELECT b.course_code, b.year_code, b.kai, b.day_code, b.race_num,
+            b.race_name, b.race_name_9char, b.start_time, b.distance, b.tds_code, b.heads, b.grade AS race_grade,
+            k.uma_num, k.waku_num, k.uma_name, k.kishu_name, k.trainer_name, k.trainer_code,
+            k.kijun_odds, k.kijun_ninki, k.kyusha_index,
+            k.joho_index, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
+            c.oi_index, c.shiage_index,
+            cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
+            ans.course_score  AS ex_course,
+            ans.overall_score AS ex_overall,
+            hms.course_score  AS honmei_course,
+            hms.overall_score AS honmei_overall,
+            s.order_of_finish, s.win AS win_pay, s.place AS place_pay, s.ijou_kubun
+     FROM T_BAC b
+     JOIN T_KYI k
+       ON  k.course_code = b.course_code AND k.year_code = b.year_code
+       AND k.kai = b.kai AND k.day_code = b.day_code AND k.race_num = b.race_num
+     LEFT JOIN T_CYB c
+       ON  c.course_code = k.course_code AND c.year_code = k.year_code
+       AND c.kai = k.kai AND c.day_code = k.day_code
+       AND c.race_num = k.race_num AND c.uma_num = k.uma_num
+     LEFT JOIN T_COMBO_RECOVERY cr
+       ON  cr.kishu_code   = k.kishu_code
+       AND cr.trainer_code = k.trainer_code
+     LEFT JOIN T_ANABA_SCORE ans
+       ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
+       AND ans.kai = k.kai AND ans.day_code = k.day_code
+       AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
+     LEFT JOIN T_HONMEI_SCORE hms
+       ON  hms.course_code = k.course_code AND hms.year_code = k.year_code
+       AND hms.kai = k.kai AND hms.day_code = k.day_code
+       AND hms.race_num = k.race_num AND hms.uma_num = k.uma_num
+     LEFT JOIN T_SED s
+       ON  s.course_code = k.course_code AND s.year_code = k.year_code
+       AND s.kai = k.kai AND s.day_code = k.day_code
+       AND s.race_num = k.race_num AND s.umaban = k.uma_num
+     WHERE b.ymd = ?
+       AND b.tds_code <> '3'        -- 障害戦: EX指数/本命指数が構造的に未計算（芝ダ限定パイプライン）
+       AND b.\`class\` <> 'A1'      -- 新馬戦: 過去走なしで指数の予測力が消失（回収率検証済み）
+     ORDER BY CAST(b.course_code AS UNSIGNED), CAST(b.race_num AS UNSIGNED), CAST(k.uma_num AS UNSIGNED)`,
+    [ymd]
+  );
+
+  // 情報指数のレース内順位（denseRank・降順）を先に算出する。0/NULL/-1(非開示)は対象外。
+  // entries.html の denseRanks() と同じロジック（複勝回収率100%超シグナルの情報印1〜2位判定に使用）。
+  const johoValsByRace = new Map<string, Set<number>>();
+  for (const r of rows as any[]) {
+    const raceKey = `${r.course_code}_${r.kai}_${r.day_code}_${r.race_num}`;
+    const v = r.joho_index === null ? NaN : Number(r.joho_index);
+    if (!isNaN(v) && v !== 0 && v !== -1) {
+      if (!johoValsByRace.has(raceKey)) johoValsByRace.set(raceKey, new Set());
+      johoValsByRace.get(raceKey)!.add(v);
+    }
+  }
+  const johoRankLookup = new Map<string, Map<number, number>>();
+  for (const [raceKey, valSet] of johoValsByRace) {
+    const uniqueVals = [...valSet].sort((a, b) => b - a);
+    const rankMap = new Map<number, number>();
+    uniqueVals.forEach((v, i) => rankMap.set(v, i + 1));
+    johoRankLookup.set(raceKey, rankMap);
+  }
+
+  const result = (rows as any[])
+    .map(r => {
+      const honmei = r.honmei_course === null ? null : Number(r.honmei_course);
+      const ex = r.ex_course === null ? null : Number(r.ex_course);
+      const ninki = r.kijun_ninki === null ? null : Number(r.kijun_ninki);
+      const odds = r.kijun_odds === null ? null : Number(r.kijun_odds);
+      const kyushaIndex = r.kyusha_index === null ? null : Number(r.kyusha_index);
+
+      // 本命指数はオッズ<10倍、EX指数はオッズ≧10倍の馬にのみ意味を持つ（entries.htmlのisHonmei/isAnabaと同じゲート）
+      const isHonmei = odds !== null && odds > 0 && odds < 10;
+      const isAnaba = odds !== null && odds >= 10;
+      const matchHonmei = isHonmei && honmei !== null && honmei >= 50 && ninki !== null && ninki !== 1;
+      // EX指数(コース)は実データ検証の結果、複勝回収率が100%を超えるのは100以上の帯のみ
+      // （kijun_odds≥10の母集団: 100+→複勝100.1%、90〜99→75.7%、以下単調に低下、2026-09-06確認）
+      const matchEx = isAnaba && ex !== null && ex >= 100;
+
+      // 厩指穴信頼グレードは、この馬自身が対象セグメント（基準オッズ≧15 かつ 厩舎指数≧0）に該当する場合のみ適用する
+      // （entries.htmlのstableYellow/kytGradeと同じゲート。厩舎の総合グレードを無条件に全馬へ適用しない）
+      const inKyushaSegment = odds !== null && odds >= 15 && kyushaIndex !== null && kyushaIndex >= 0;
+      const kyushaGrade = inKyushaSegment ? (gradeMap[r.trainer_code] ?? null) : null;
+      // グレードは複勝回収率帯そのもの（S≥130/A≥110/B≥100/C≥90…）のため、複勝回収率100%以上はS/A/Bのみ
+      const matchKyusha = kyushaGrade !== null && ['S', 'A', 'B'].includes(kyushaGrade);
+
+      // ── 複勝回収率100%超シグナル（sc≥3 × 基準オッズ15〜30倍）───────────────
+      // 出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md（entries.htmlと同一ロジック）
+      const exOverall = r.ex_overall === null ? null : Number(r.ex_overall);
+      const honmeiOverall = r.honmei_overall === null ? null : Number(r.honmei_overall);
+      const comboRr = r.combo_place_rr === null ? null : Number(r.combo_place_rr);
+      const comboN = r.combo_n === null ? 0 : Number(r.combo_n);
+      const oiIdx = r.oi_index === null ? 0 : Number(r.oi_index);
+      const shiageIdx = r.shiage_index === null ? 0 : Number(r.shiage_index);
+      const goalJuni = r.goal_juni === null ? NaN : Number(r.goal_juni);
+      const tenJuni = r.ten_index_juni === null ? NaN : Number(r.ten_index_juni);
+      const agariJuni = r.agari_index_juni === null ? NaN : Number(r.agari_index_juni);
+      const johoRaw = r.joho_index === null ? NaN : Number(r.joho_index);
+      const raceKey = `${r.course_code}_${r.kai}_${r.day_code}_${r.race_num}`;
+      const johoRank = (!isNaN(johoRaw) && johoRaw !== 0 && johoRaw !== -1)
+        ? (johoRankLookup.get(raceKey)?.get(johoRaw) ?? null) : null;
+
+      const scIdx = ((exOverall !== null && exOverall >= 15) || (honmeiOverall !== null && honmeiOverall >= 10)) ? 1 : 0;
+      const scIdxStrong = ((exOverall !== null && exOverall >= 50) || (honmeiOverall !== null && honmeiOverall >= 30)) ? 1 : 0;
+      const scCombo = (comboN >= 30 && comboRr !== null && comboRr >= 100) ? 1 : 0;
+      const scChokyo = (oiIdx >= 70 || shiageIdx >= 70) ? 1 : 0;
+      const scGoal = (!isNaN(goalJuni) && (goalJuni === 1 || goalJuni === 2)) ? 1 : 0;
+      const scJoho = (johoRank !== null && (johoRank === 1 || johoRank === 2)) ? 1 : 0;
+      const scTa = (tenJuni === 1 || agariJuni === 1) ? 1 : 0;
+      const fukushoSc = scIdx + scIdxStrong + scCombo + scChokyo + scGoal + scJoho + scTa;
+      const matchFukusho100 = fukushoSc >= 3 && odds !== null && odds >= 15 && odds < 30;
+
+      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100) return null;
+
+      return {
+        course_code: r.course_code, year_code: r.year_code, kai: r.kai, day_code: r.day_code, race_num: r.race_num,
+        race_name: r.race_name, race_name_9char: r.race_name_9char, start_time: r.start_time,
+        distance: r.distance, tds_code: r.tds_code, heads: r.heads, race_grade: r.race_grade,
+        uma_num: r.uma_num, waku_num: r.waku_num, uma_name: r.uma_name,
+        kishu_name: r.kishu_name, trainer_name: r.trainer_name,
+        kijun_odds: r.kijun_odds, kijun_ninki: r.kijun_ninki,
+        ex_course: ex, honmei_course: honmei, kyusha_grade: kyushaGrade,
+        match_honmei: matchHonmei, match_ex: matchEx, match_kyusha: matchKyusha,
+        match_fukusho100: matchFukusho100, fukusho_sc: matchFukusho100 ? fukushoSc : null,
+        order_of_finish: r.order_of_finish, win_pay: r.win_pay, place_pay: r.place_pay, ijou_kubun: r.ijou_kubun,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  res.json({ ymd, rows: result });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // 穴馬指数 ETL: POST /api/anaba-etl
 // anaba_index.sql を4パートに分割して順次実行。SSEで進捗を返す。
 // ────────────────────────────────────────────────────────────────────────────
@@ -1022,50 +1566,60 @@ app.post('/api/anaba-etl', (req, res) => {
   const send = (msg: string, extra?: object) =>
     res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
 
+  if (etlLocks.anaba) {
+    send('エラー: EX指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.anaba = true;
+
   (async () => {
-    if (!fs.existsSync(ANABA_SQL_FILE)) {
-      send('エラー: sql/anaba_index.sql が見つかりません', { error: true, done: true });
-      res.end(); return;
-    }
-    const sql = fs.readFileSync(ANABA_SQL_FILE, 'utf-8');
-    const parts = splitSqlByParts(sql);
-
-    for (let i = 0; i < parts.length; i++) {
-      const partNum = i + 1;
-      const label = PART_LABELS[partNum] ?? `Part${partNum}`;
-      send(`[Part${partNum}] ${label} 開始...`);
-
-      // Part 4 (指数計算) は長時間かかるためハートビートを定期送信
-      let heartbeat: NodeJS.Timeout | undefined;
-      if (partNum === 4) {
-        let elapsed = 0;
-        heartbeat = setInterval(() => {
-          elapsed += 15;
-          send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
-        }, 15_000);
-      }
-
-      try {
-        await runMysqlSql(parts[i]);
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] ${label} 完了`);
-      } catch (err: any) {
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+    try {
+      if (!fs.existsSync(ANABA_SQL_FILE)) {
+        send('エラー: sql/anaba_index.sql が見つかりません', { error: true, done: true });
         res.end(); return;
       }
+      const sql = fs.readFileSync(ANABA_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
+
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
+
+        // Part 4 (指数計算) は長時間かかるためハートビートを定期送信
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum === 4) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
+      }
+
+      // 件数確認
+      try {
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_ANABA_SCORE'
+        );
+        send(`完了: T_ANABA_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.anaba = false;
     }
-
-    // 件数確認
-    try {
-      const [[row]] = await pool.query<any>(
-        'SELECT COUNT(*) AS cnt FROM T_ANABA_SCORE'
-      );
-      send(`完了: T_ANABA_SCORE ${Number(row.cnt).toLocaleString()} 件`);
-    } catch { /* 無視 */ }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
@@ -1085,48 +1639,58 @@ app.post('/api/honmei-etl', (req, res) => {
   const send = (msg: string, extra?: object) =>
     res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
 
+  if (etlLocks.honmei) {
+    send('エラー: 本命指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.honmei = true;
+
   (async () => {
-    if (!fs.existsSync(HONMEI_SQL_FILE)) {
-      send('エラー: sql/honmei_index.sql が見つかりません', { error: true, done: true });
-      res.end(); return;
-    }
-    const sql = fs.readFileSync(HONMEI_SQL_FILE, 'utf-8');
-    const parts = splitSqlByParts(sql);
+    try {
+      if (!fs.existsSync(HONMEI_SQL_FILE)) {
+        send('エラー: sql/honmei_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(HONMEI_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
 
-    for (let i = 0; i < parts.length; i++) {
-      const partNum = i + 1;
-      const label = HONMEI_PART_LABELS[partNum] ?? `Part${partNum}`;
-      send(`[Part${partNum}] ${label} 開始...`);
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = HONMEI_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
 
-      let heartbeat: NodeJS.Timeout | undefined;
-      if (partNum === 4) {
-        let elapsed = 0;
-        heartbeat = setInterval(() => {
-          elapsed += 15;
-          send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
-        }, 15_000);
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum === 4) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part4] 指数計算中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
       }
 
       try {
-        await runMysqlSql(parts[i]);
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] ${label} 完了`);
-      } catch (err: any) {
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
-        res.end(); return;
-      }
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_HONMEI_SCORE'
+        );
+        send(`完了: T_HONMEI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.honmei = false;
     }
-
-    try {
-      const [[row]] = await pool.query<any>(
-        'SELECT COUNT(*) AS cnt FROM T_HONMEI_SCORE'
-      );
-      send(`完了: T_HONMEI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
-    } catch { /* 無視 */ }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
@@ -1146,48 +1710,58 @@ app.post('/api/tenkai-etl', (req, res) => {
   const send = (msg: string, extra?: object) =>
     res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
 
+  if (etlLocks.tenkai) {
+    send('エラー: 展開シナリオ指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.tenkai = true;
+
   (async () => {
-    if (!fs.existsSync(TENKAI_SQL_FILE)) {
-      send('エラー: sql/tenkai_index.sql が見つかりません', { error: true, done: true });
-      res.end(); return;
-    }
-    const sql = fs.readFileSync(TENKAI_SQL_FILE, 'utf-8');
-    const parts = splitSqlByParts(sql);
+    try {
+      if (!fs.existsSync(TENKAI_SQL_FILE)) {
+        send('エラー: sql/tenkai_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(TENKAI_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
 
-    for (let i = 0; i < parts.length; i++) {
-      const partNum = i + 1;
-      const label = TENKAI_PART_LABELS[partNum] ?? `Part${partNum}`;
-      send(`[Part${partNum}] ${label} 開始...`);
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = TENKAI_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
 
-      let heartbeat: NodeJS.Timeout | undefined;
-      if (partNum >= 3) {
-        let elapsed = 0;
-        heartbeat = setInterval(() => {
-          elapsed += 15;
-          send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
-        }, 15_000);
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 3) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
       }
 
       try {
-        await runMysqlSql(parts[i]);
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] ${label} 完了`);
-      } catch (err: any) {
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
-        res.end(); return;
-      }
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_TENKAI_SCORE'
+        );
+        send(`完了: T_TENKAI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.tenkai = false;
     }
-
-    try {
-      const [[row]] = await pool.query<any>(
-        'SELECT COUNT(*) AS cnt FROM T_TENKAI_SCORE'
-      );
-      send(`完了: T_TENKAI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
-    } catch { /* 無視 */ }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
@@ -1207,48 +1781,254 @@ app.post('/api/pacefit-etl', (req, res) => {
   const send = (msg: string, extra?: object) =>
     res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
 
+  if (etlLocks.pacefit) {
+    send('エラー: 展開適合指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.pacefit = true;
+
   (async () => {
-    if (!fs.existsSync(PACEFIT_SQL_FILE)) {
-      send('エラー: sql/pacefit_index.sql が見つかりません', { error: true, done: true });
-      res.end(); return;
-    }
-    const sql = fs.readFileSync(PACEFIT_SQL_FILE, 'utf-8');
-    const parts = splitSqlByParts(sql);
+    try {
+      if (!fs.existsSync(PACEFIT_SQL_FILE)) {
+        send('エラー: sql/pacefit_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(PACEFIT_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
 
-    for (let i = 0; i < parts.length; i++) {
-      const partNum = i + 1;
-      const label = PACEFIT_PART_LABELS[partNum] ?? `Part${partNum}`;
-      send(`[Part${partNum}] ${label} 開始...`);
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = PACEFIT_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
 
-      let heartbeat: NodeJS.Timeout | undefined;
-      if (partNum >= 3) {
-        let elapsed = 0;
-        heartbeat = setInterval(() => {
-          elapsed += 15;
-          send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
-        }, 15_000);
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 3) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
       }
 
       try {
-        await runMysqlSql(parts[i]);
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] ${label} 完了`);
-      } catch (err: any) {
-        if (heartbeat) clearInterval(heartbeat);
-        send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_PACEFIT_SCORE'
+        );
+        send(`完了: T_PACEFIT_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.pacefit = false;
+    }
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// コース回収率指数 ETL: POST /api/course-recovery-etl
+// course_recovery_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
+// 事前に T_COURSE_FACTOR_AGG（course.htmlのETL）が構築済みである必要がある。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/course-recovery-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.courseRecovery) {
+    send('エラー: コース回収率指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.courseRecovery = true;
+
+  (async () => {
+    try {
+      const [[cfaRow]] = await pool.query<any>(
+        `SELECT COUNT(*) AS cnt FROM T_COURSE_FACTOR_AGG WHERE factor_type='baseline'`
+      );
+      if (!Number(cfaRow.cnt)) {
+        send('エラー: T_COURSE_FACTOR_AGG が未構築です。先に course.html 側のコース別集計ETLを実行してください', { error: true, done: true });
         res.end(); return;
       }
+
+      if (!fs.existsSync(COURSE_RECOVERY_SQL_FILE)) {
+        send('エラー: sql/course_recovery_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(COURSE_RECOVERY_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
+
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = COURSE_RECOVERY_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
+
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 3) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
+      }
+
+      try {
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_COURSE_RECOVERY_SCORE'
+        );
+        send(`完了: T_COURSE_RECOVERY_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      // カバレッジ整合性チェック: 出走全馬（tds1/2・class<>A1）に対してスコア漏れがないか
+      // （ブリンカー指数で「スコア計算がT_SEDに依存し未実施レースの馬が漏れる」バグが発生した教訓を踏まえ、
+      //   同種の指数ETLすべてに同じ自動チェックを入れる）
+      try {
+        const [[gapRow]] = await pool.query<any>(
+          `SELECT COUNT(*) AS gap
+           FROM T_KYI k
+           INNER JOIN T_BAC b
+             ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+           LEFT JOIN T_COURSE_RECOVERY_SCORE crs
+             ON  crs.course_code=k.course_code AND crs.year_code=k.year_code AND crs.kai=k.kai
+             AND crs.day_code=k.day_code AND crs.race_num=k.race_num AND crs.uma_num=CAST(TRIM(k.uma_num) AS UNSIGNED)
+           WHERE b.tds_code IN ('1','2') AND b.class <> 'A1' AND crs.score IS NULL`
+        );
+        const gap = Number(gapRow.gap);
+        if (gap > 0) {
+          send(`⚠ カバレッジ異常: 出走馬のうちスコア未計算が ${gap.toLocaleString()} 件あります（本来は0件のはず。sql/course_recovery_index.sql のPart3を確認してください）`, { error: true });
+        } else {
+          send('カバレッジチェックOK: スコア未計算の漏れなし');
+        }
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.courseRecovery = false;
     }
-
-    try {
-      const [[row]] = await pool.query<any>(
-        'SELECT COUNT(*) AS cnt FROM T_PACEFIT_SCORE'
-      );
-      send(`完了: T_PACEFIT_SCORE ${Number(row.cnt).toLocaleString()} 件`);
-    } catch { /* 無視 */ }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ブリンカー指数 ETL: POST /api/blinker-etl
+// blinker_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
+// 設計: document/分析レポート/ブリンカー指数_仕様書.md
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/blinker-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.blinker) {
+    send('エラー: ブリンカー指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.blinker = true;
+
+  (async () => {
+    try {
+      if (!fs.existsSync(BLINKER_SQL_FILE)) {
+        send('エラー: sql/blinker_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(BLINKER_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
+
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = BLINKER_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
+
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 2) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
+      }
+
+      try {
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_BLINKER_SCORE'
+        );
+        send(`完了: T_BLINKER_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      // カバレッジ整合性チェック: blinker IN ('1','2') な馬でスコアが漏れていないか
+      // （過去に「スコア計算がT_SEDに依存し、未実施レースの馬が漏れる」バグが発生したため、
+      //   ETL実行のたびに必ず自動検出する。0件でなければ画面上に赤字で警告を出す）
+      try {
+        const [[gapRow]] = await pool.query<any>(
+          `SELECT COUNT(*) AS gap
+           FROM T_KYI k
+           INNER JOIN T_BAC b
+             ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+           LEFT JOIN T_BLINKER_SCORE bls
+             ON  bls.course_code=k.course_code AND bls.year_code=k.year_code AND bls.kai=k.kai
+             AND bls.day_code=k.day_code AND bls.race_num=k.race_num AND bls.uma_num=k.uma_num
+           WHERE k.blinker IN ('1','2') AND b.tds_code IN ('1','2') AND b.class <> 'A1' AND bls.grade IS NULL`
+        );
+        const gap = Number(gapRow.gap);
+        if (gap > 0) {
+          send(`⚠ カバレッジ異常: blinker指定馬のうちスコア未計算が ${gap.toLocaleString()} 件あります（本来は0件のはず。sql/blinker_index.sql のPart3を確認してください）`, { error: true });
+        } else {
+          send('カバレッジチェックOK: スコア未計算の漏れなし');
+        }
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.blinker = false;
+    }
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
@@ -1272,7 +2052,14 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
   const send = (msg: string, extra?: object) =>
     res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
 
+  if (etlLocks.analyzeFact) {
+    send('エラー: 分析ファクトテーブルETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.analyzeFact = true;
+
   (async () => {
+   try {
     // Step1: DDL
     send('[Step1] テーブル定義中...');
     await pool.query('DROP TABLE IF EXISTS T_ANALYZE_FACT');
@@ -1308,6 +2095,8 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
       shiage_index      SMALLINT UNSIGNED,
       ex_overall        DECIMAL(7,1),
       ex_course         DECIMAL(7,1),
+      honmei_overall    DECIMAL(7,1),
+      honmei_course     DECIMAL(7,1),
       tenkai_score      DECIMAL(7,1),
       chokyo_sp         TINYINT,
       PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num),
@@ -1324,18 +2113,21 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
     const [tblRows] = await pool.query<any>(
       `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME IN ('T_ANABA_SCORE','T_PACEFIT_SCORE')`
+       AND TABLE_NAME IN ('T_ANABA_SCORE','T_HONMEI_SCORE','T_PACEFIT_SCORE')`
     );
     const existingTbls = new Set((tblRows as any[]).map((r: any) => (r.TABLE_NAME as string).toLowerCase()));
     const hasAnaba   = existingTbls.has('t_anaba_score');
+    const hasHonmei  = existingTbls.has('t_honmei_score');
     const hasPacefit = existingTbls.has('t_pacefit_score');
-    send(`[Step2] T_ANABA_SCORE=${hasAnaba ? '有' : '無'}, T_PACEFIT_SCORE=${hasPacefit ? '有' : '無'}`);
+    send(`[Step2] T_ANABA_SCORE=${hasAnaba ? '有' : '無'}, T_HONMEI_SCORE=${hasHonmei ? '有' : '無'}, T_PACEFIT_SCORE=${hasPacefit ? '有' : '無'}`);
 
     // Step3: INSERT（数分かかる）
     send('[Step3] データ挿入開始（数分かかります）...');
     const ansJoinEtl   = hasAnaba   ? `LEFT JOIN T_ANABA_SCORE ans ON k.course_code=ans.course_code AND k.year_code=ans.year_code AND k.kai=ans.kai AND k.day_code=ans.day_code AND k.race_num=ans.race_num AND k.uma_num=ans.uma_num` : '';
+    const hmsJoinEtl   = hasHonmei  ? `LEFT JOIN T_HONMEI_SCORE hms ON k.course_code=hms.course_code AND k.year_code=hms.year_code AND k.kai=hms.kai AND k.day_code=hms.day_code AND k.race_num=hms.race_num AND k.uma_num=hms.uma_num` : '';
     const pfsJoinEtl   = hasPacefit ? `LEFT JOIN T_PACEFIT_SCORE pfs ON k.course_code=pfs.course_code AND k.year_code=pfs.year_code AND k.kai=pfs.kai AND k.day_code=pfs.day_code AND k.race_num=pfs.race_num AND k.uma_num=pfs.uma_num` : '';
     const ansSelectEtl = hasAnaba   ? 'ans.overall_score, ans.course_score' : 'NULL, NULL';
+    const hmsSelectEtl = hasHonmei  ? 'hms.overall_score, hms.course_score' : 'NULL, NULL';
     const pfsSelectEtl = hasPacefit ? 'pfs.overall_score'                  : 'NULL';
 
     const etlSql = `
@@ -1406,6 +2198,7 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
         CAST(c.oi_index                 AS UNSIGNED),
         CAST(c.shiage_index             AS UNSIGNED),
         ${ansSelectEtl},
+        ${hmsSelectEtl},
         ${pfsSelectEtl},
         sp.sp_score
       FROM t_bac b
@@ -1421,6 +2214,7 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
         ON  k.course_code = c.course_code AND k.year_code = c.year_code
         AND k.kai = c.kai AND k.day_code = c.day_code AND k.race_num = c.race_num AND k.uma_num = c.uma_num
       ${ansJoinEtl}
+      ${hmsJoinEtl}
       ${pfsJoinEtl}
       LEFT JOIN sp_cte sp
         ON  k.course_code = sp.course_code AND k.year_code = sp.year_code
@@ -1452,7 +2246,9 @@ app.post('/api/analyze-fact-etl', (_req, res) => {
     factTableReady = true;
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
-
+   } finally {
+     etlLocks.analyzeFact = false;
+   }
   })().catch((err: any) => {
     send(`エラー: ${err.message}`, { error: true, done: true });
     res.end();
@@ -1479,6 +2275,17 @@ app.listen(PORT, () => {
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  ).catch(() => {});
+  // 自分の予想印テーブルが未作成の場合は作成（entries API の LEFT JOIN が失敗しないようにする）
+  pool.query(
+    `CREATE TABLE IF NOT EXISTS T_MY_MARK (
+      course_code CHAR(2) NOT NULL, year_code CHAR(2) NOT NULL,
+      kai CHAR(1) NOT NULL, day_code CHAR(1) NOT NULL,
+      race_num CHAR(2) NOT NULL, uma_num CHAR(2) NOT NULL,
+      mark CHAR(1) NOT NULL COMMENT '自分の予想印(1=◎ 2=○ 3=▲ 4=注 5=△ 6=▽)',
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='自分の予想印（ユーザー入力・分析用）'`
   ).catch(() => {});
   // デフォルト年範囲のキャッシュを起動直後にバックグラウンドで生成
   setTimeout(() => {

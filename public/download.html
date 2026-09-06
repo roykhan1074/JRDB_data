@@ -235,6 +235,45 @@
   <div class="card" id="pacefit-log-card" style="padding:0; overflow:hidden; display:none">
     <div class="log-area" id="pacefit-log-area"></div>
   </div>
+
+  <!-- コース回収率指数ETL -->
+  <h1 style="margin-top:32px">コース回収率指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.9rem;color:#555;margin-bottom:12px">
+      脚質・テン指数順位・上がり指数順位・IDM印・情報印・厩舎指数帯・枠番の全体回収率偏差に、コース(場×芝ダ×距離)自体の平均回収率補正を1項加えた指数です。<br>
+      事前に「コース別傾向分析」側のコース別集計（T_COURSE_FACTOR_AGG）が構築済みである必要があります。<br>
+      <span style="color:#d97706;font-weight:600">⚠ Part 3 は数分かかります。</span>
+    </p>
+    <button class="btn-run" id="btn-course-recovery" style="max-width:280px">コース回収率指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="course-recovery-status-bar">
+    <div class="spinner" id="course-recovery-spinner"></div>
+    <span id="course-recovery-status-text"></span>
+  </div>
+
+  <div class="card" id="course-recovery-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="course-recovery-log-area"></div>
+  </div>
+
+  <!-- ブリンカー指数ETL -->
+  <h1 style="margin-top:32px">ブリンカー指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.9rem;color:#555;margin-bottom:12px">
+      初装着・再装着ブリンカー馬について、コース適性・クラス・脚質・性別・ローテーション・枠番・IDM順位・テン指数順位・上がり指数順位の回収率偏差から指数を算出します（基準オッズは含めません）。<br>
+      <span style="color:#d97706;font-weight:600">⚠ バックテストにより連続値としての中間解像度は低いことが判明しています。A/B/Cの3段階グレードを主な参考値として扱ってください（詳細: document/分析レポート/ブリンカー指数_仕様書.md）。</span>
+    </p>
+    <button class="btn-run" id="btn-blinker" style="max-width:280px">ブリンカー指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="blinker-status-bar">
+    <div class="spinner" id="blinker-spinner"></div>
+    <span id="blinker-status-text"></span>
+  </div>
+
+  <div class="card" id="blinker-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="blinker-log-area"></div>
+  </div>
 </div>
 
 <script>
@@ -245,6 +284,7 @@
     { name: 'SED', desc: '成績データ' },
     { name: 'UKC', desc: '馬マスタ' },
     { name: 'SRB', desc: '成績速報' },
+    { name: 'HJC', desc: '払戻データ' },
   ];
 
   // 今日の日付をデフォルトにセット
@@ -698,6 +738,146 @@
       pacefitAppend('エラー: ' + err.message, 'error');
     } finally {
       pacefitBtn.disabled = false;
+    }
+  });
+
+  // ── コース回収率指数 ETL ──────────────────────────────
+  const crLog   = document.getElementById('course-recovery-log-area');
+  const crCard  = document.getElementById('course-recovery-log-card');
+  const crBar   = document.getElementById('course-recovery-status-bar');
+  const crSpin  = document.getElementById('course-recovery-spinner');
+  const crText  = document.getElementById('course-recovery-status-text');
+  const crBtn   = document.getElementById('btn-course-recovery');
+
+  function crAppend(msg, cls) {
+    if (!crCard.style.display || crCard.style.display === 'none') crCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    crLog.appendChild(line);
+    crLog.scrollTop = crLog.scrollHeight;
+  }
+
+  function crStatus(state, text) {
+    crBar.className = 'status-bar ' + state;
+    crText.textContent = text;
+    crSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  crBtn.addEventListener('click', async () => {
+    crBtn.disabled = true;
+    crLog.textContent = '';
+    crCard.style.display = '';
+    crStatus('running', 'コース回収率指数を更新中...');
+    crAppend('コース回収率指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/course-recovery-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            crAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              crStatus('error', 'エラーが発生しました');
+            } else {
+              crStatus('done', 'コース回収率指数の更新が完了しました');
+              crAppend('[完了] 回収率分析ページで指数帯別の回収率を確認できます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      crStatus('error', 'エラー: ' + err.message);
+      crAppend('エラー: ' + err.message, 'error');
+    } finally {
+      crBtn.disabled = false;
+    }
+  });
+
+  // ── ブリンカー指数 ETL ──────────────────────────────
+  const biLog   = document.getElementById('blinker-log-area');
+  const biCard  = document.getElementById('blinker-log-card');
+  const biBar   = document.getElementById('blinker-status-bar');
+  const biSpin  = document.getElementById('blinker-spinner');
+  const biText  = document.getElementById('blinker-status-text');
+  const biBtn   = document.getElementById('btn-blinker');
+
+  function biAppend(msg, cls) {
+    if (!biCard.style.display || biCard.style.display === 'none') biCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    biLog.appendChild(line);
+    biLog.scrollTop = biLog.scrollHeight;
+  }
+
+  function biStatus(state, text) {
+    biBar.className = 'status-bar ' + state;
+    biText.textContent = text;
+    biSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  biBtn.addEventListener('click', async () => {
+    biBtn.disabled = true;
+    biLog.textContent = '';
+    biCard.style.display = '';
+    biStatus('running', 'ブリンカー指数を更新中...');
+    biAppend('ブリンカー指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/blinker-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            biAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              biStatus('error', 'エラーが発生しました');
+            } else {
+              biStatus('done', 'ブリンカー指数の更新が完了しました');
+              biAppend('[完了] 回収率分析ページでグレード別の回収率を確認できます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      biStatus('error', 'エラー: ' + err.message);
+      biAppend('エラー: ' + err.message, 'error');
+    } finally {
+      biBtn.disabled = false;
     }
   });
 </script>

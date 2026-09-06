@@ -138,12 +138,53 @@ CREATE TABLE IF NOT EXISTS T_HONMEI_SCORE (
   score_tekisei     DECIMAL(5,1)          COMMENT '適性スコア',
   score_blood       DECIMAL(5,1)          COMMENT '血統スコア',
 
+  -- コース別内訳（course_scoreに対応。コース別データがある5ファクターのみ別列を持つ。
+  -- 残り6ファクター(idm/joho/kyusha/chokyo/joshodo/tekisei)はコース別データが存在せず
+  -- overall_scoreと同値のため、上のscore_*列をそのまま流用する）
+  score_ten_c         DECIMAL(5,1)        COMMENT 'テン順位スコア(コース別)',
+  score_agari_c       DECIMAL(5,1)        COMMENT '上がり順位スコア(コース別)',
+  score_ichi_c        DECIMAL(5,1)        COMMENT '位置順位スコア(コース別)',
+  score_goal_c        DECIMAL(5,1)        COMMENT 'ゴール順位スコア(コース別)',
+  score_combo_c       DECIMAL(5,1)        COMMENT '複合展開スコア(コース別)',
+  score_kyakushitsu_c DECIMAL(5,1)        COMMENT '脚質スコア(コース別)',
+  score_blood_c       DECIMAL(5,1)        COMMENT '血統スコア(コース別)',
+
   updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
                                           ON UPDATE CURRENT_TIMESTAMP,
 
   PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='本命指数（出馬表表示用）';
+
+-- 既存テーブルへのマイグレーション（新規列を追加）
+-- MySQLの ALTER TABLE ... ADD COLUMN に IF NOT EXISTS 構文は存在しない（MariaDB専用）ため、
+-- INFORMATION_SCHEMA を見て未追加の列だけ動的SQLで追加する（再実行しても安全）。
+DELIMITER $$
+CREATE PROCEDURE IF NOT EXISTS sp_add_col_if_missing(
+  IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_def VARCHAR(255)
+)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
+  ) THEN
+    SET @ddl = CONCAT('ALTER TABLE ', p_table, ' ADD COLUMN ', p_column, ' ', p_def);
+    PREPARE stmt FROM @ddl;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+  END IF;
+END$$
+DELIMITER ;
+
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_ten_c',         "DECIMAL(5,1) COMMENT 'テン順位スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_agari_c',       "DECIMAL(5,1) COMMENT '上がり順位スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_ichi_c',        "DECIMAL(5,1) COMMENT '位置順位スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_goal_c',        "DECIMAL(5,1) COMMENT 'ゴール順位スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_combo_c',       "DECIMAL(5,1) COMMENT '複合展開スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_kyakushitsu_c', "DECIMAL(5,1) COMMENT '脚質スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_blood_c',       "DECIMAL(5,1) COMMENT '血統スコア(コース別)'");
+
+DROP PROCEDURE IF EXISTS sp_add_col_if_missing;
 
 
 -- ============================================================
@@ -1041,7 +1082,9 @@ INSERT INTO T_HONMEI_SCORE (
   overall_score, course_score,
   score_ten, score_agari, score_ichi, score_goal, score_combo,
   score_idm, score_joho, score_kyusha, score_chokyo,
-  score_kyakushitsu, score_joshodo, score_tekisei, score_blood
+  score_kyakushitsu, score_joshodo, score_tekisei, score_blood,
+  score_ten_c, score_agari_c, score_ichi_c, score_goal_c, score_combo_c,
+  score_kyakushitsu_c, score_blood_c
 )
 SELECT
   k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
@@ -1112,7 +1155,17 @@ SELECT
   ROUND(COALESCE(f_jos_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
   ROUND(COALESCE(f_kyo_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
   ROUND(COALESCE(f_chi_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery +
-        COALESCE(f_hah_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1)
+        COALESCE(f_hah_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
+
+  -- ── コース別内訳（course_scoreの各項に対応） ────────────────────
+  ROUND(COALESCE(f_ten_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ten_o.win_recovery   - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_agari_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_agari_o.win_recovery - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_ichi_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ichi_o.win_recovery  - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_goal_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_goal_o.win_recovery  - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_combo_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_combo_o.win_recovery - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_kya_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_kya_o.win_recovery   - bl_o.win_recovery, 0), 1),
+  ROUND(COALESCE(f_chi_tds.win_recovery - bl_o.win_recovery, f_chi_o.win_recovery - bl_o.win_recovery, 0)
+      + COALESCE(f_hah_tds.win_recovery - bl_o.win_recovery, f_hah_o.win_recovery - bl_o.win_recovery, 0), 1)
 
 FROM T_KYI k
 INNER JOIN T_BAC b
@@ -1376,4 +1429,11 @@ ON DUPLICATE KEY UPDATE
   score_kyakushitsu = VALUES(score_kyakushitsu),
   score_joshodo     = VALUES(score_joshodo),
   score_tekisei     = VALUES(score_tekisei),
-  score_blood       = VALUES(score_blood);
+  score_blood       = VALUES(score_blood),
+  score_ten_c         = VALUES(score_ten_c),
+  score_agari_c       = VALUES(score_agari_c),
+  score_ichi_c        = VALUES(score_ichi_c),
+  score_goal_c        = VALUES(score_goal_c),
+  score_combo_c       = VALUES(score_combo_c),
+  score_kyakushitsu_c = VALUES(score_kyakushitsu_c),
+  score_blood_c       = VALUES(score_blood_c);

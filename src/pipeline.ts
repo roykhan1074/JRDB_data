@@ -5,9 +5,10 @@ import { convertCYB } from './converters/CYBConverter';
 import { convertSED } from './converters/SEDConverter';
 import { convertUKC } from './converters/UKCConverter';
 import { convertSRB } from './converters/SRBConverter';
+import { convertHJC } from './converters/HJCConverter';
 import { loadCSVFile } from './db/loadCSV';
 
-export type PrefixName = 'BAC' | 'KYI' | 'CYB' | 'SED' | 'UKC' | 'SRB';
+export type PrefixName = 'BAC' | 'KYI' | 'CYB' | 'SED' | 'UKC' | 'SRB' | 'HJC';
 
 // prefix → JRDBグループ名のマッピング
 const PREFIX_TO_GROUP: Record<PrefixName, string> = {
@@ -17,6 +18,7 @@ const PREFIX_TO_GROUP: Record<PrefixName, string> = {
   SED: 'race_result',
   UKC: 'horse_master',
   SRB: 'race_result',
+  HJC: 'payout',
 };
 
 const CONVERTERS: Record<PrefixName, (ymd: string) => void> = {
@@ -26,6 +28,7 @@ const CONVERTERS: Record<PrefixName, (ymd: string) => void> = {
   SED: convertSED,
   UKC: convertUKC,
   SRB: convertSRB,
+  HJC: convertHJC,
 };
 
 export type LogFn = (message: string) => void;

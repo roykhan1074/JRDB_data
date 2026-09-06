@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ウォッチリスト - RACE INSIGHT</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+
+    .page-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+    .page-sub   { font-size: .8rem; color: #777; margin-bottom: 16px; }
+
+    .search-card { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .search-card label { font-size: .82rem; color: #666; }
+    .search-card input[type=date] { border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; font-size: .9rem; font-family: inherit; }
+    .btn-show { background: #0071e3; color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-size: .9rem; cursor: pointer; font-family: inherit; }
+    .btn-show:hover { background: #0077ed; }
+
+    .cond-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .78rem; color: #555; margin-bottom: 16px; }
+    .cond-legend span { display: inline-flex; align-items: center; gap: 5px; }
+
+    .tag { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: .68rem; font-weight: 700; color: #fff; margin: 1px 2px 1px 0; }
+    .tag-honmei { background: #db2777; }
+    .tag-ex     { background: #dc2626; }
+    .tag-kyusha { background: #0891b2; }
+    .tag-fukusho100 { background: #ca8a04; cursor: help; }
+
+    .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px; }
+    .race-head { font-size: .9rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .race-head .sub { font-size: .76rem; color: #888; font-weight: 400; }
+
+    .table-wrap { overflow-x: auto; }
+    table.wl-table { table-layout: fixed; width: 970px; border-collapse: collapse; font-size: .82rem; }
+    table.wl-table th { text-align: center; font-size: .72rem; color: #888; padding: 5px 6px; border-bottom: 1px solid #eee; white-space: nowrap; overflow: hidden; }
+    table.wl-table th.hdr-nowrap { white-space: nowrap; word-break: normal; }
+    table.wl-table td { text-align: center; padding: 6px 6px; border-bottom: 1px solid #f5f5f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    table.wl-table td.left { text-align: left; }
+    table.wl-table tr:last-child td { border-bottom: none; }
+
+    /* 複勝回収率100%超シグナル行ハイライト（entries.htmlと同一配色）
+       出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md */
+    table.wl-table tr.fukusho-signal { background: #fbcfe8; }
+    table.wl-table tr.fukusho-signal td:first-child {
+      box-shadow: inset 3px 0 0 #dc2626;
+    }
+
+    .kyt-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 22px; height: 20px; border-radius: 4px; padding: 0 5px;
+      font-weight: 700; font-size: .74rem;
+    }
+    .kyt-s { background: #dc2626; color: #fff; }
+    .kyt-a { background: #fbcfe8; }
+    .kyt-b { background: #f97316; color: #fff; }
+    .kyt-c { background: #fef9c3; }
+
+    .result-1st { color:#dc2626; font-weight:700; }
+    .result-2nd { color:#2563eb; font-weight:700; }
+    .result-3rd { color:#16a34a; font-weight:700; }
+    .pay-hit    { color:#dc2626; font-weight:700; }
+    .pending    { color:#bbb; }
+
+    .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
+    .err { color: #dc2626; }
+    .hidden { display: none; }
+
+    .summary-bar { display:flex; gap:20px; font-size:.8rem; color:#555; margin-bottom:14px; flex-wrap:wrap; }
+    .summary-bar b { color:#1a1a2e; }
+  </style>
+  <link rel="stylesheet" href="/race-insight.css">
+</head>
+<body>
+<header>
+  <h1>🔍 ウォッチリスト</h1>
+  <a class="back-link" href="/">← RACE INSIGHT</a>
+</header>
+
+<main>
+  <div class="page-title">条件該当馬ウォッチリスト</div>
+  <div class="page-sub">指定した開催日について、以下いずれかの条件に該当する馬を抽出します。</div>
+
+  <div class="cond-legend">
+    <span><span class="tag tag-honmei">本命</span>一番人気以外×本命指数(コース)≧50</span>
+    <span><span class="tag tag-ex">EX</span>EX指数(コース)≧100（複勝回収率100%超の帯）</span>
+    <span><span class="tag tag-kyusha">厩信頼</span>厩指穴信頼ランク S〜B（複勝回収率100%以上）</span>
+    <span><span class="tag tag-fukusho100">複勝100</span>sc≥3×基準オッズ15〜30倍（複勝回収率100.7%・的中率20.0%、n=3,523で検証済み）</span>
+  </div>
+
+  <div class="search-card">
+    <label>開催日</label>
+    <input type="date" id="date-input">
+    <button class="btn-show" id="btn-show">表示</button>
+  </div>
+
+  <div id="msg" class="msg">開催日を選択して「表示」を押してください</div>
+  <div id="result" class="hidden"></div>
+</main>
+
+<script>
+const COURSE_NAME = {'01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京','06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'};
+const TDS_LABEL = {'1':'芝','2':'ダート','3':'障害'};
+
+function fmtTime(t) {
+  if (!t || t.length < 4) return '—';
+  return `${t.slice(0,2)}:${t.slice(2,4)}`;
+}
+
+function orderCell(r) {
+  const ijou = String(r.ijou_kubun ?? '').trim();
+  if (ijou === '1') return '<span class="pending">取消</span>';
+  if (ijou === '2') return '<span class="pending">除外</span>';
+  const ord = parseInt(String(r.order_of_finish ?? '').trim());
+  if (isNaN(ord) || ord <= 0) return '<span class="pending">—</span>';
+  const cls = ord === 1 ? 'result-1st' : ord === 2 ? 'result-2nd' : ord === 3 ? 'result-3rd' : '';
+  return `<span class="${cls}">${ord}着</span>`;
+}
+function payCell(v) {
+  const n = parseInt(String(v ?? '').trim());
+  if (isNaN(n) || n <= 0) return '<span class="pending">—</span>';
+  return `<span class="pay-hit">${n.toLocaleString()}円</span>`;
+}
+
+function isHonmei(r) { const o = parseFloat(r.kijun_odds); return !isNaN(o) && o > 0 && o < 10; }
+function isAnaba(r)  { const o = parseFloat(r.kijun_odds); return !isNaN(o) && o >= 10; }
+
+function tagsHtml(r) {
+  const tags = [];
+  if (r.match_honmei) tags.push('<span class="tag tag-honmei">本命</span>');
+  if (r.match_ex) tags.push('<span class="tag tag-ex">EX</span>');
+  if (r.match_kyusha) tags.push('<span class="tag tag-kyusha">厩信頼</span>');
+  if (r.match_fukusho100) tags.push(`<span class="tag tag-fukusho100" title="複勝回収率100%超シグナル（sc=${r.fukusho_sc}点×オッズ${Number(r.kijun_odds).toFixed(1)}倍）">複勝100</span>`);
+  return tags.join('');
+}
+
+async function load() {
+  const dateVal = document.getElementById('date-input').value; // YYYY-MM-DD
+  if (!dateVal) return;
+  const ymd = dateVal.replace(/-/g, '');
+
+  document.getElementById('msg').textContent = '読み込み中...';
+  document.getElementById('msg').classList.remove('err', 'hidden');
+  document.getElementById('result').classList.add('hidden');
+
+  try {
+    const res = await fetch(`/api/watchlist?ymd=${ymd}`);
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || '取得に失敗しました'); }
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('msg').textContent = 'エラー: ' + e.message;
+    document.getElementById('msg').classList.add('err');
+  }
+}
+
+function render(data) {
+  const rows = data.rows;
+  if (!rows.length) {
+    document.getElementById('msg').textContent = 'この開催日に該当する馬はいませんでした';
+    document.getElementById('msg').classList.remove('err');
+    document.getElementById('result').classList.add('hidden');
+    return;
+  }
+
+  // レースごとにグループ化
+  const races = new Map();
+  for (const r of rows) {
+    const key = `${r.course_code}_${r.race_num}`;
+    if (!races.has(key)) races.set(key, []);
+    races.get(key).push(r);
+  }
+
+  let hitCount = 0, totalWithResult = 0;
+  for (const r of rows) {
+    if (r.order_of_finish) {
+      totalWithResult++;
+      if (parseInt(r.win_pay) > 0) hitCount++;
+    }
+  }
+
+  const summaryHtml = totalWithResult > 0
+    ? `<div class="summary-bar">
+         <span>該当馬数: <b>${rows.length}</b></span>
+         <span>結果判明済み: <b>${totalWithResult}</b></span>
+         <span>単勝的中: <b>${hitCount}</b></span>
+       </div>`
+    : `<div class="summary-bar"><span>該当馬数: <b>${rows.length}</b>（この開催日はまだ結果が出ていません）</span></div>`;
+
+  const panelsHtml = Array.from(races.entries()).map(([key, horses]) => {
+    const first = horses[0];
+    const courseName = COURSE_NAME[first.course_code] || first.course_code;
+    const raceName = first.race_name_9char?.trim() || first.race_name?.trim() || '';
+    const tds = TDS_LABEL[first.tds_code] || '';
+    const dist = first.distance?.trim() ? first.distance.trim() + 'm' : '';
+
+    const rowsHtml = horses.map(r => `
+      <tr${r.match_fukusho100 ? ' class="fukusho-signal"' : ''}>
+        <td><strong>${parseInt(r.uma_num)}</strong></td>
+        <td class="left">${r.uma_name?.trim() || '—'}</td>
+        <td class="left">${tagsHtml(r)}</td>
+        <td class="left">${r.kishu_name?.trim() || '—'}</td>
+        <td class="left">${r.trainer_name?.trim() || '—'}</td>
+        <td>${r.kijun_odds ? Number(r.kijun_odds).toFixed(1) : '—'}</td>
+        <td>${r.kijun_ninki ?? '—'}</td>
+        <td>${isHonmei(r) && r.honmei_course !== null ? r.honmei_course.toFixed(0) : '—'}</td>
+        <td>${isAnaba(r) && r.ex_course !== null ? r.ex_course.toFixed(0) : '—'}</td>
+        <td>${r.kyusha_grade ? `<span class="kyt-badge kyt-${r.kyusha_grade.toLowerCase()}">${r.kyusha_grade}</span>` : '—'}</td>
+        <td>${orderCell(r)}</td>
+        <td>${payCell(r.win_pay)}</td>
+        <td>${payCell(r.place_pay)}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <div class="panel">
+        <div class="race-head">
+          ${courseName} ${parseInt(first.race_num)}R ${raceName}
+          <span class="sub">${fmtTime(first.start_time)}発走 ${tds} ${dist} ${first.heads ? parseInt(first.heads)+'頭' : ''}</span>
+        </div>
+        <div class="table-wrap">
+        <table class="wl-table">
+          <colgroup>
+            <col style="width:40px"><col style="width:160px"><col style="width:130px">
+            <col style="width:76px"><col style="width:76px"><col style="width:60px">
+            <col style="width:40px"><col style="width:70px"><col style="width:64px">
+            <col style="width:56px"><col style="width:46px"><col style="width:76px"><col style="width:76px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="hdr-nowrap">馬番</th><th class="hdr-nowrap">馬名</th><th class="hdr-nowrap">該当条件</th><th class="hdr-nowrap">騎手</th><th class="hdr-nowrap">調教師</th>
+              <th class="hdr-nowrap">オッズ</th><th class="hdr-nowrap">人気</th><th class="hdr-nowrap">本命指数</th><th class="hdr-nowrap">EX指数</th><th>厩指穴<br>信頼</th>
+              <th class="hdr-nowrap">着順</th><th class="hdr-nowrap">単勝</th><th class="hdr-nowrap">複勝</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('result').innerHTML = summaryHtml + panelsHtml;
+  document.getElementById('msg').classList.add('hidden');
+  document.getElementById('result').classList.remove('hidden');
+}
+
+document.getElementById('btn-show').addEventListener('click', load);
+
+// URLパラメータ ?ymd=YYYYMMDD にも対応
+(function applyUrlParams() {
+  const p = new URLSearchParams(location.search);
+  const ymd = p.get('ymd');
+  if (ymd && /^\d{8}$/.test(ymd)) {
+    document.getElementById('date-input').value = `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+    load();
+  } else {
+    const today = new Date();
+    document.getElementById('date-input').value = today.toISOString().slice(0, 10);
+  }
+})();
+</script>
+<script src="/nav.js"></script>
+</body>
+</html>

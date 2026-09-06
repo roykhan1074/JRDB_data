@@ -22,6 +22,7 @@ const TABLE_CONFIG: Record<string, TableConfig> = {
   SED: { prefix: 'SED', table: 'T_SED', schemaFile: 'T_SED.sql' },
   UKC: { prefix: 'UKC', table: 'T_UKC', schemaFile: 'T_UKC.sql' },
   SRB: { prefix: 'SRB', table: 'T_SRB', schemaFile: 'T_SRB.sql' },
+  HJC: { prefix: 'HJC', table: 'T_HJC', schemaFile: 'T_HJC.sql' },
 };
 
 async function createTableIfNotExists(conn: Awaited<ReturnType<typeof createConnection>>, schemaFile: string) {

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>指数帯別回収率 - RACE INSIGHT</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    main { max-width: 900px; margin: 20px auto; padding: 0 16px; }
+
+    .page-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+    .page-sub   { font-size: .8rem; color: #777; margin-bottom: 16px; }
+
+    .toolbar {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 18px;
+    }
+    .btn-run {
+      background: #0071e3; color: #fff; border: none; border-radius: 6px;
+      padding: 8px 18px; font-size: .85rem; cursor: pointer; font-family: inherit;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .btn-run:disabled { background: #aaa; cursor: not-allowed; }
+    .updated-at { font-size: .78rem; color: #888; }
+
+    .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 18px; }
+    .panel h3 { font-size: .85rem; color: #333; margin-bottom: 4px; }
+    .panel .desc { font-size: .74rem; color: #888; margin-bottom: 12px; }
+
+    .mark-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .mark-table th { text-align: center; font-size: .74rem; color: #888; padding: 6px 8px; border-bottom: 1px solid #eee; }
+    .mark-table td { text-align: center; padding: 7px 8px; border-bottom: 1px solid #f5f5f5; }
+    .mark-table tr:last-child td { border-bottom: none; }
+    .mark-table td.label-cell { text-align: left; font-weight: 700; }
+
+    .rr-100up { color: #dc2626; font-weight: 700; }
+    .rr-90up  { color: #db2777; }
+    .rr-80up  { color: #d97706; }
+    .rr-low   { color: #6b7280; }
+
+    /* 厩指穴信頼グレードバッジ（entries.htmlと同じ配色） */
+    .kyt-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 26px; height: 22px; border-radius: 5px; padding: 0 6px;
+      font-weight: 700; font-size: .82rem;
+    }
+    .kyt-s { background: #dc2626; color: #fff; }
+    .kyt-a { background: #fbcfe8; }
+    .kyt-b { background: #f97316; color: #fff; }
+    .kyt-c { background: #fef9c3; }
+    .kyt-d { background: #fff; border: 1px solid #e5e7eb; }
+    .kyt-e { background: #e5e7eb; color: #6b7280; }
+    .kyt-f { background: #374151; color: #fff; }
+
+    .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
+    .err { color: #dc2626; }
+    .hidden { display: none; }
+  </style>
+  <link rel="stylesheet" href="/race-insight.css">
+</head>
+<body>
+<header>
+  <h1>📊 指数帯別回収率</h1>
+  <a class="back-link" href="/">← RACE INSIGHT</a>
+</header>
+
+<main>
+  <div class="page-title">EX指数帯・本命指数帯・コース回収率指数帯・ブリンカー指数グレード・厩指穴信頼グレード別 回収率</div>
+  <div class="page-sub">全期間データを集計。新しいレースデータを取り込んだ後は「再集計」を押してください。</div>
+
+  <div class="toolbar">
+    <button class="btn-run" id="btn-refresh">🔄 再集計</button>
+    <span class="updated-at" id="updated-at"></span>
+  </div>
+
+  <div id="msg" class="msg">読み込み中...</div>
+  <div id="result" class="hidden">
+    <div class="panel">
+      <h3>EX指数帯別成績</h3>
+      <div class="desc">出走馬中EX指数（anaba_course_score）の帯域別。基準オッズ≧10倍の馬のみ対象（EX指数の設計上、穴馬向け指数のため）</div>
+      <table class="mark-table">
+        <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-ex"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>本命指数帯別成績</h3>
+      <div class="desc">本命指数（honmei_course_score）の帯域別。基準オッズ＜10倍の馬のみ対象</div>
+      <table class="mark-table">
+        <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-honmei"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>コース回収率指数帯別成績</h3>
+      <div class="desc">脚質・テン指数順位・上がり指数順位・IDM印・情報印・厩舎指数帯・枠番の全体回収率偏差＋コース平均回収率補正（ハイブリッド版）。全出走馬対象。設計: document/分析レポート/コース回収率指数_設計とバックテストレポート.md</div>
+      <table class="mark-table">
+        <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-course-recovery"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>ブリンカー指数グレード別成績</h3>
+      <div class="desc">初装着・再装着馬のコース適性・クラス・脚質・性別・ローテーション・枠番・IDM順位・テン指数順位・上がり指数順位の回収率偏差から算出。バックテストで中間解像度が低いことが判明しているためA/B/Cの3段階グレードのみ集計（詳細: document/分析レポート/ブリンカー指数_仕様書.md）</div>
+      <table class="mark-table">
+        <thead><tr><th>区分</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-blinker"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>厩指穴信頼グレード別成績</h3>
+      <div class="desc">厩舎指数≧0×基準オッズ≧15倍セグメントでの厩舎別信頼度グレード（S〜F、n≧20の厩舎のみ）。出馬表の「厩指穴信頼」列と同じグレード定義</div>
+      <table class="mark-table">
+        <thead><tr><th>グレード</th><th>厩舎数</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-kyusha"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+function rrClass(v) {
+  if (v === null || v === undefined) return '';
+  if (v >= 100) return 'rr-100up';
+  if (v >= 90)  return 'rr-90up';
+  if (v >= 80)  return 'rr-80up';
+  return 'rr-low';
+}
+function rrSpan(v) {
+  return `<span class="${rrClass(v)}">${v ?? '—'}%</span>`;
+}
+
+function renderRows(tbodyId, rows, labelFn) {
+  const tbody = document.getElementById(tbodyId);
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td class="label-cell">${labelFn(r)}</td>
+      ${tbodyId === 'tbody-kyusha' ? `<td>${(r.trainer_count||0).toLocaleString()}</td>` : ''}
+      <td>${(r.total_count||0).toLocaleString()}</td>
+      <td>${r.win_rate ?? '—'}%</td>
+      <td>${r.renso_rate ?? '—'}%</td>
+      <td>${r.place_rate ?? '—'}%</td>
+      <td>${rrSpan(r.win_recovery)}</td>
+      <td>${rrSpan(r.place_recovery)}</td>
+    </tr>
+  `).join('');
+}
+
+async function load() {
+  document.getElementById('msg').textContent = '読み込み中...';
+  document.getElementById('msg').classList.remove('err', 'hidden');
+  document.getElementById('result').classList.add('hidden');
+  try {
+    const res = await fetch('/api/factor-recovery');
+    if (!res.ok) throw new Error('取得に失敗しました');
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('msg').textContent = 'エラー: ' + e.message;
+    document.getElementById('msg').classList.add('err');
+  }
+}
+
+function render(data) {
+  renderRows('tbody-ex', data.exIndex, r => r.band_label);
+  renderRows('tbody-honmei', data.honmeiIndex, r => r.band_label);
+  renderRows('tbody-course-recovery', data.courseRecovery || [], r => r.band_label);
+  renderRows('tbody-blinker', data.blinkerIndex || [], r => r.band_label);
+  renderRows('tbody-kyusha', data.kyushaTrust, r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);
+
+  const updated = new Date(data.updatedAt);
+  document.getElementById('updated-at').textContent = '最終集計: ' + updated.toLocaleString('ja-JP');
+
+  document.getElementById('msg').classList.add('hidden');
+  document.getElementById('result').classList.remove('hidden');
+}
+
+document.getElementById('btn-refresh').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.textContent = '再集計中...';
+  document.getElementById('msg').textContent = '再集計中...(数秒〜十数秒かかります)';
+  document.getElementById('msg').classList.remove('err', 'hidden');
+  document.getElementById('result').classList.add('hidden');
+  try {
+    const res = await fetch('/api/factor-recovery/refresh', { method: 'POST' });
+    if (!res.ok) throw new Error('再集計に失敗しました');
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('msg').textContent = 'エラー: ' + e.message;
+    document.getElementById('msg').classList.add('err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 再集計';
+  }
+});
+
+load();
+</script>
+<script src="/nav.js"></script>
+</body>
+</html>

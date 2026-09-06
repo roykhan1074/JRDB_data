@@ -46,6 +46,10 @@ export const FILE_GROUPS: Record<string, FileGroupDef> = {
     label: '調教師マスター (CS)',
     dirs: ['Cs'],
   },
+  payout: {
+    label: '払戻データ (HJC)',
+    dirs: ['Hjc'],
+  },
 };
 
 /** ダウンロード対象グループ（省略時は全グループ） */

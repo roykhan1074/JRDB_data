@@ -460,6 +460,18 @@
             <input type="text" class="short" id="ex_course_to">
           </div>
           <div class="filter-row">
+            <span class="filter-label">本命指数全体</span>
+            <input type="text" class="short" id="honmei_overall_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="honmei_overall_to">
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">本命指数コース</span>
+            <input type="text" class="short" id="honmei_course_from">
+            <span class="sep">〜</span>
+            <input type="text" class="short" id="honmei_course_to">
+          </div>
+          <div class="filter-row">
             <span class="filter-label">展開指数</span>
             <input type="text" class="short" id="tenkai_from">
             <span class="sep">〜</span>
@@ -505,6 +517,8 @@
             <option value="chokyo_sp">調教SP</option>
             <option value="ex_overall">EX指数全体帯</option>
             <option value="ex_course">EX指数コース帯</option>
+            <option value="honmei_overall">本命指数全体帯</option>
+            <option value="honmei_course">本命指数コース帯</option>
             <option value="tenkai">展開指数帯</option>
           </select>
         </div>
@@ -536,6 +550,8 @@
             <option value="chokyo_sp">調教SP</option>
             <option value="ex_overall">EX指数全体帯</option>
             <option value="ex_course">EX指数コース帯</option>
+            <option value="honmei_overall">本命指数全体帯</option>
+            <option value="honmei_course">本命指数コース帯</option>
             <option value="tenkai">展開指数帯</option>
           </select>
         </div>
@@ -567,6 +583,8 @@
             <option value="chokyo_sp">調教SP</option>
             <option value="ex_overall">EX指数全体帯</option>
             <option value="ex_course">EX指数コース帯</option>
+            <option value="honmei_overall">本命指数全体帯</option>
+            <option value="honmei_course">本命指数コース帯</option>
             <option value="tenkai">展開指数帯</option>
           </select>
         </div>
@@ -723,6 +741,8 @@
       chokyo_sp_from: val('chokyo_sp_from'), chokyo_sp_to: val('chokyo_sp_to'),
       ex_overall_from: val('ex_overall_from'), ex_overall_to: val('ex_overall_to'),
       ex_course_from: val('ex_course_from'), ex_course_to: val('ex_course_to'),
+      honmei_overall_from: val('honmei_overall_from'), honmei_overall_to: val('honmei_overall_to'),
+      honmei_course_from: val('honmei_course_from'), honmei_course_to: val('honmei_course_to'),
       tenkai_from: val('tenkai_from'), tenkai_to: val('tenkai_to'),
       kishu: val('kishu'), trainer: val('trainer'), umanushi: val('umanushi'),
       aggregate_01: val('aggregate_01'),
@@ -885,6 +905,7 @@
      'kyusha_idx_from','kyusha_idx_to',
      'oikiri_from','oikiri_to','shiage_from','shiage_to',
      'ex_overall_from','ex_overall_to','ex_course_from','ex_course_to',
+     'honmei_overall_from','honmei_overall_to','honmei_course_from','honmei_course_to',
      'tenkai_from','tenkai_to',
      'kishu','trainer','umanushi',
     ].forEach(id => { document.getElementById(id).value = ''; });
