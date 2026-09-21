@@ -1,13 +1,12 @@
 (function () {
   const NAV_LINKS = [
-    { href: '/search.html',   label: 'レース検索' },
+    { href: '/download.html', label: 'データ取込', frequent: true },
+    { href: '/search.html',   label: 'レース検索', frequent: true },
+    { href: '/watchlist.html',    label: 'ウォッチリスト', frequent: true },
     { href: '/analyze.html',  label: '回収率分析' },
-    { href: '/jockey.html',       label: '騎手能力' },
     { href: '/jockey-ninki.html', label: '騎手×人気偏差' },
     { href: '/course.html',       label: 'コース別傾向' },
     { href: '/factor-recovery.html', label: '指数帯別回収率' },
-    { href: '/watchlist.html',    label: 'ウォッチリスト' },
-    { href: '/download.html', label: 'データ取込' },
     { href: '/stats.html',    label: 'データ確認' },
   ];
 
@@ -21,7 +20,8 @@
 
   const items = NAV_LINKS.map(l => {
     const active = path === l.href || path === l.href.replace('.html', '');
-    return `<li><a href="${l.href}"${active ? ' class="nav-active"' : ''}>${l.label}</a></li>`;
+    const classes = [active ? 'nav-active' : '', l.frequent ? 'nav-frequent' : ''].filter(Boolean).join(' ');
+    return `<li><a href="${l.href}"${classes ? ` class="${classes}"` : ''}>${l.label}</a></li>`;
   }).join('');
 
   const nav = document.createElement('nav');

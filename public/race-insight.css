@@ -105,3 +105,10 @@ header {
   color: #fff;
   font-weight: 600;
 }
+.nav-links li a.nav-frequent {
+  color: #f0c040;
+}
+.nav-links li a.nav-frequent:hover,
+.nav-links li a.nav-frequent.nav-active {
+  color: #f0c040;
+}

@@ -198,6 +198,9 @@
     <div class="log-area" id="honmei-log-area"></div>
   </div>
 
+  <!-- 現在未使用のため非表示（展開シナリオ指数・展開適合指数・コース回収率指数）。
+       削除ではなく非表示: 再度使う可能性があるためコードは残す。 -->
+  <div hidden>
   <!-- 展開シナリオ指数ETL -->
   <h1 style="margin-top:32px">展開シナリオ指数 更新</h1>
   <div class="card">
@@ -255,13 +258,14 @@
   <div class="card" id="course-recovery-log-card" style="padding:0; overflow:hidden; display:none">
     <div class="log-area" id="course-recovery-log-area"></div>
   </div>
+  </div>
 
   <!-- ブリンカー指数ETL -->
   <h1 style="margin-top:32px">ブリンカー指数 更新</h1>
   <div class="card">
     <p style="font-size:.9rem;color:#555;margin-bottom:12px">
       初装着・再装着ブリンカー馬について、コース適性・クラス・脚質・性別・ローテーション・枠番・IDM順位・テン指数順位・上がり指数順位の回収率偏差から指数を算出します（基準オッズは含めません）。<br>
-      <span style="color:#d97706;font-weight:600">⚠ バックテストにより連続値としての中間解像度は低いことが判明しています。A/B/Cの3段階グレードを主な参考値として扱ってください（詳細: document/分析レポート/ブリンカー指数_仕様書.md）。</span>
+      <span style="color:#d97706;font-weight:600">⚠ バックテストにより連続値としての中間解像度は低いことが判明しています。A/B/Cの3段階グレードを主な参考値として扱ってください（詳細: document/指数/ブリンカー指数_仕様書.md）。</span>
     </p>
     <button class="btn-run" id="btn-blinker" style="max-width:280px">ブリンカー指数を更新する</button>
   </div>
@@ -273,6 +277,25 @@
 
   <div class="card" id="blinker-log-card" style="padding:0; overflow:hidden; display:none">
     <div class="log-area" id="blinker-log-area"></div>
+  </div>
+
+  <!-- 不利巻き返し指数ETL -->
+  <h1 style="margin-top:32px">不利巻き返し指数 更新</h1>
+  <div class="card">
+    <p style="font-size:.9rem;color:#555;margin-bottom:12px">
+      前走で不利(T_SED.furi)を受けた馬のうち、EX指数(コース)・上がり指数順位・仕上指数・情報印など他のJRDB指標では既に高評価されていない馬を検出します。<br>
+      <span style="color:#d97706;font-weight:600">⚠ 他指標で既に高評価済みの馬は常にグレードC(スコア0)になります。詳細: メモリ project_furi_index</span>
+    </p>
+    <button class="btn-run" id="btn-furi" style="max-width:280px">不利巻き返し指数を更新する</button>
+  </div>
+
+  <div class="status-bar" id="furi-status-bar">
+    <div class="spinner" id="furi-spinner"></div>
+    <span id="furi-status-text"></span>
+  </div>
+
+  <div class="card" id="furi-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="furi-log-area"></div>
   </div>
 </div>
 
@@ -878,6 +901,76 @@
       biAppend('エラー: ' + err.message, 'error');
     } finally {
       biBtn.disabled = false;
+    }
+  });
+
+  // ── 不利巻き返し指数 ETL ──────────────────────────────
+  const fiLog   = document.getElementById('furi-log-area');
+  const fiCard  = document.getElementById('furi-log-card');
+  const fiBar   = document.getElementById('furi-status-bar');
+  const fiSpin  = document.getElementById('furi-spinner');
+  const fiText  = document.getElementById('furi-status-text');
+  const fiBtn   = document.getElementById('btn-furi');
+
+  function fiAppend(msg, cls) {
+    if (!fiCard.style.display || fiCard.style.display === 'none') fiCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    fiLog.appendChild(line);
+    fiLog.scrollTop = fiLog.scrollHeight;
+  }
+
+  function fiStatus(state, text) {
+    fiBar.className = 'status-bar ' + state;
+    fiText.textContent = text;
+    fiSpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  fiBtn.addEventListener('click', async () => {
+    fiBtn.disabled = true;
+    fiLog.textContent = '';
+    fiCard.style.display = '';
+    fiStatus('running', '不利巻き返し指数を更新中...');
+    fiAppend('不利巻き返し指数 ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/furi-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            fiAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              fiStatus('error', 'エラーが発生しました');
+            } else {
+              fiStatus('done', '不利巻き返し指数の更新が完了しました');
+              fiAppend('[完了] 出馬表の「不利指数」列でグレードを確認できます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      fiStatus('error', 'エラー: ' + err.message);
+      fiAppend('エラー: ' + err.message, 'error');
+    } finally {
+      fiBtn.disabled = false;
     }
   });
 </script>

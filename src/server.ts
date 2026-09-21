@@ -25,6 +25,7 @@ const PACEFIT_SQL_FILE  = path.join(__dirname, '..', 'sql', 'pacefit_index.sql')
 const HONMEI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'honmei_index.sql');
 const COURSE_RECOVERY_SQL_FILE = path.join(__dirname, '..', 'sql', 'course_recovery_index.sql');
 const BLINKER_SQL_FILE = path.join(__dirname, '..', 'sql', 'blinker_index.sql');
+const FURI_SQL_FILE    = path.join(__dirname, '..', 'sql', 'furi_index.sql');
 
 const PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
@@ -66,6 +67,12 @@ const BLINKER_PART_LABELS: Record<number, string> = {
   3: '指数計算 (T_BLINKER_SCORE)',
 };
 
+const FURI_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクター集計 (T_FURI_FACTOR_AGG)',
+  3: '指数計算 (T_FURI_SCORE)',
+};
+
 /** SQLファイルを -- Part N: マーカーで4パートに分割 */
 function splitSqlByParts(content: string): string[] {
   const parts: string[] = [];
@@ -92,6 +99,7 @@ function runMysqlSql(sql: string): Promise<void> {
       '-u', process.env.DB_USER ?? 'root',
       `-p${process.env.DB_PASS ?? ''}`,
       '--batch',
+      '--default-character-set=utf8mb4',
       process.env.DB_NAME ?? 'racing',
     ];
     const proc = spawn('mysql', args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -123,7 +131,7 @@ function runMysqlSql(sql: string): Promise<void> {
 }
 
 /** ETL多重実行防止用ロック。同じ指数のETLが実行中は次のリクエストを即エラーにする。 */
-const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false };
+const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false, furi: false };
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -459,6 +467,8 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             k.kishu_code, k.trainer_code,
             k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
             bls.grade AS blinker_grade,
+            fs.grade AS furi_grade, fs.score AS furi_score,
+            fs.prev_furi_degree, fs.prev_furi_phase, fs.is_hot AS furi_is_hot,
             k.chokyo_yajirushi,
             k.nyukyu_nichi_mae,
             k.hohbokusaki_rank,
@@ -548,6 +558,10 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        ON  bls.course_code = k.course_code AND bls.year_code = k.year_code
        AND bls.kai = k.kai AND bls.day_code = k.day_code
        AND bls.race_num = k.race_num AND bls.uma_num = k.uma_num
+     LEFT JOIN T_FURI_SCORE fs
+       ON  fs.course_code = k.course_code AND fs.year_code = k.year_code
+       AND fs.kai = k.kai AND fs.day_code = k.day_code
+       AND fs.race_num = k.race_num AND fs.uma_num = k.uma_num
      LEFT JOIN T_MY_MARK mm
        ON  mm.course_code = k.course_code AND mm.year_code = k.year_code
        AND mm.kai = k.kai AND mm.day_code = k.day_code
@@ -1323,7 +1337,7 @@ async function computeFactorRecovery() {
   );
   } catch { /* T_COURSE_RECOVERY_SCORE 未構築の場合は空配列のまま */ }
 
-  // ── ブリンカー指数グレード別（設計: document/分析レポート/ブリンカー指数_仕様書.md）──
+  // ── ブリンカー指数グレード別（設計: document/指数/ブリンカー指数_仕様書.md）──
   // バックテストにより連続値としての中間解像度は低いことが判明しているため、A/B/C の3段階グレードのみ集計する
   let blinkerIndexRows: any[] = [];
   try {
@@ -1427,13 +1441,14 @@ app.get('/api/watchlist', async (req, res) => {
             b.race_name, b.race_name_9char, b.start_time, b.distance, b.tds_code, b.heads, b.grade AS race_grade,
             k.uma_num, k.waku_num, k.uma_name, k.kishu_name, k.trainer_name, k.trainer_code,
             k.kijun_odds, k.kijun_ninki, k.kyusha_index,
-            k.joho_index, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
+            k.joho_index, k.goal_juni, k.ten_index_juni, k.agari_index_juni, k.blinker,
             c.oi_index, c.shiage_index,
             cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
             ans.course_score  AS ex_course,
             ans.overall_score AS ex_overall,
             hms.course_score  AS honmei_course,
             hms.overall_score AS honmei_overall,
+            bls.grade AS blinker_grade,
             s.order_of_finish, s.win AS win_pay, s.place AS place_pay, s.ijou_kubun
      FROM T_BAC b
      JOIN T_KYI k
@@ -1454,6 +1469,10 @@ app.get('/api/watchlist', async (req, res) => {
        ON  hms.course_code = k.course_code AND hms.year_code = k.year_code
        AND hms.kai = k.kai AND hms.day_code = k.day_code
        AND hms.race_num = k.race_num AND hms.uma_num = k.uma_num
+     LEFT JOIN T_BLINKER_SCORE bls
+       ON  bls.course_code = k.course_code AND bls.year_code = k.year_code
+       AND bls.kai = k.kai AND bls.day_code = k.day_code
+       AND bls.race_num = k.race_num AND bls.uma_num = k.uma_num
      LEFT JOIN T_SED s
        ON  s.course_code = k.course_code AND s.year_code = k.year_code
        AND s.kai = k.kai AND s.day_code = k.day_code
@@ -1507,6 +1526,11 @@ app.get('/api/watchlist', async (req, res) => {
       // グレードは複勝回収率帯そのもの（S≥130/A≥110/B≥100/C≥90…）のため、複勝回収率100%以上はS/A/Bのみ
       const matchKyusha = kyushaGrade !== null && ['S', 'A', 'B'].includes(kyushaGrade);
 
+      // ブリンカー指数グレードA（entries.htmlのblinkerBgと同じゲート: 初装着/再装着のみ対象）
+      const blinkerType = String(r.blinker ?? '').trim();
+      const blinkerGrade = String(r.blinker_grade ?? '').trim();
+      const matchBlinker = (blinkerType === '1' || blinkerType === '2') && blinkerGrade === 'A';
+
       // ── 複勝回収率100%超シグナル（sc≥3 × 基準オッズ15〜30倍）───────────────
       // 出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md（entries.htmlと同一ロジック）
       const exOverall = r.ex_overall === null ? null : Number(r.ex_overall);
@@ -1533,7 +1557,7 @@ app.get('/api/watchlist', async (req, res) => {
       const fukushoSc = scIdx + scIdxStrong + scCombo + scChokyo + scGoal + scJoho + scTa;
       const matchFukusho100 = fukushoSc >= 3 && odds !== null && odds >= 15 && odds < 30;
 
-      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100) return null;
+      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100 && !matchBlinker) return null;
 
       return {
         course_code: r.course_code, year_code: r.year_code, kai: r.kai, day_code: r.day_code, race_num: r.race_num,
@@ -1545,6 +1569,7 @@ app.get('/api/watchlist', async (req, res) => {
         ex_course: ex, honmei_course: honmei, kyusha_grade: kyushaGrade,
         match_honmei: matchHonmei, match_ex: matchEx, match_kyusha: matchKyusha,
         match_fukusho100: matchFukusho100, fukusho_sc: matchFukusho100 ? fukushoSc : null,
+        match_blinker: matchBlinker, blinker_type: blinkerType, blinker_grade: blinkerGrade,
         order_of_finish: r.order_of_finish, win_pay: r.win_pay, place_pay: r.place_pay, ijou_kubun: r.ijou_kubun,
       };
     })
@@ -1944,7 +1969,7 @@ app.post('/api/course-recovery-etl', (req, res) => {
 // ────────────────────────────────────────────────────────────────────────────
 // ブリンカー指数 ETL: POST /api/blinker-etl
 // blinker_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
-// 設計: document/分析レポート/ブリンカー指数_仕様書.md
+// 設計: document/指数/ブリンカー指数_仕様書.md
 // ────────────────────────────────────────────────────────────────────────────
 app.post('/api/blinker-etl', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -2028,6 +2053,100 @@ app.post('/api/blinker-etl', (req, res) => {
       res.end();
     } finally {
       etlLocks.blinker = false;
+    }
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 不利巻き返し指数 ETL: POST /api/furi-etl
+// furi_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
+// 設計: メモリ project_furi_index / project_prev_furi_recovery_analysis
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/furi-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.furi) {
+    send('エラー: 不利巻き返し指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.furi = true;
+
+  (async () => {
+    try {
+      if (!fs.existsSync(FURI_SQL_FILE)) {
+        send('エラー: sql/furi_index.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(FURI_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
+
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = FURI_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
+
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 2) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
+      }
+
+      try {
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_FURI_SCORE'
+        );
+        send(`完了: T_FURI_SCORE ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      // カバレッジ整合性チェック: 前走リンクを持つ対象母集団でスコアが漏れていないか
+      try {
+        const [[gapRow]] = await pool.query<any>(
+          `SELECT COUNT(*) AS gap
+           FROM T_KYI k
+           INNER JOIN T_BAC b
+             ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+           LEFT JOIN T_FURI_SCORE fs
+             ON  fs.course_code=k.course_code AND fs.year_code=k.year_code AND fs.kai=k.kai
+             AND fs.day_code=k.day_code AND fs.race_num=k.race_num AND fs.uma_num=k.uma_num
+           WHERE b.\`class\` <> 'A1' AND b.tds_code <> '3'
+             AND k.prev1_seiseki_key IS NOT NULL AND k.prev1_seiseki_key <> ''
+             AND fs.grade IS NULL`
+        );
+        const gap = Number(gapRow.gap);
+        if (gap > 0) {
+          send(`⚠ カバレッジ異常: 対象馬のうちスコア未計算が ${gap.toLocaleString()} 件あります（本来は0件のはず。sql/furi_index.sql のPart3を確認してください）`, { error: true });
+        } else {
+          send('カバレッジチェックOK: スコア未計算の漏れなし');
+        }
+      } catch { /* 無視 */ }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.furi = false;
     }
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);

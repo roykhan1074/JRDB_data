@@ -75,7 +75,7 @@ DELETE FROM T_CYB WHERE load_date = 'YYYYMMDD';
 
 ## 穴馬指数
 
-出馬表に表示される「穴馬指数」の詳細仕様については [document/分析レポート/穴馬指数_仕様書.md](document/分析レポート/穴馬指数_仕様書.md) を参照。
+出馬表に表示される「穴馬指数」の詳細仕様については [document/指数/穴馬指数_仕様書.md](document/指数/穴馬指数_仕様書.md) を参照。
 
 ### 更新手順
 

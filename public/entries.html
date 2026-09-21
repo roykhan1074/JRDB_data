@@ -234,11 +234,11 @@
     /* 複勝回収率100%超シグナル行ハイライト: sc≥3 × 基準オッズ15~30倍
        出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md
        walk-forward検証済み: 複勝回収率100.7%・的中率20.0%（n=3,523、学習/評価の複数期間で再現） */
-    tbody tr.fukusho-signal { background: #fbcfe8 !important; }
-    tbody tr.fukusho-signal:hover { background: #f9a8d4 !important; }
     tbody tr.fukusho-signal td:first-child {
       box-shadow: inset 3px 0 0 #dc2626;
     }
+    tbody tr.fukusho-signal td.horse-name { background: #fbcfe8 !important; }
+    tbody tr.fukusho-signal:hover td.horse-name { background: #f9a8d4 !important; }
 
     /* カスタムツールチップ */
     .ts-wrap { display: inline-flex; align-items: center; gap: 3px; cursor: help; }
@@ -312,6 +312,7 @@
         <col style="width:56px">  <!-- 厩舎指数 -->
         <col style="width:56px">  <!-- 厩指穴信頼 -->
         <col style="width:56px">  <!-- 調教SP -->
+        <col style="width:64px">  <!-- 不利指数 -->
         <col style="width:0">      <!-- 展開指数（非表示） -->
         <col style="width:46px">  <!-- 着順 -->
         <col style="width:52px">  <!-- 単勝 -->
@@ -342,6 +343,7 @@
           <th rowspan="2" class="group-sep col-divider hdr-nowrap">厩指数</th>
           <th rowspan="2" title="厩指穴信頼: 厩舎指数≥0×基準オッズ≥15倍セグメントでの厩舎別信頼度グレード（S~F）&#10;n≥20の厩舎のみ判定">厩指穴<br>信頼</th>
           <th rowspan="2" class="group-sep hdr-nowrap">調教SP</th>
+          <th rowspan="2" class="hdr-nowrap" title="不利巻き返し指数&#10;前走で不利を受けた馬のうち、EX指数/上がり指数/仕上指数/情報印など他指標では高評価されていない馬を検出&#10;A=該当（次走の巻き返し期待）、—=非該当">不利指数</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">展開指数</th>
           <th rowspan="2" class="group-sep col-divider">着順</th>
           <th rowspan="2">単勝</th>
@@ -915,6 +917,17 @@
         : comboGrade === 'B' ? 'background:#bbf7d0'
         : comboGrade === 'E' ? 'background:#e5e7eb' : '';
 
+      // 不利巻き返し指数（前走不利×他指標(EX指数/上がり指数/仕上指数/情報印)未評価の組み合わせを検出）
+      // grade='C'は「前走不利なし」「他指標で既に評価済み」のどちらも含む"シグナルなし"のため—表示にする
+      const furiGrade  = String(r.furi_grade ?? '').trim() || null;
+      const furiScore  = r.furi_score !== null && r.furi_score !== undefined ? parseFloat(r.furi_score) : NaN;
+      const furiDegree = r.prev_furi_degree !== null && r.prev_furi_degree !== undefined ? parseInt(r.prev_furi_degree) : null;
+      const furiPhase  = String(r.prev_furi_phase ?? '').trim() || null;
+      const furiHot    = r.furi_is_hot === 1 || r.furi_is_hot === '1';
+      const furiTip    = (furiGrade === 'A' || furiGrade === 'B')
+        ? `前走不利度${furiDegree ?? 0}${furiPhase ? '（' + furiPhase + '不利）' : ''} / 他指標では${furiHot ? '既に高評価' : '未評価'} / score${!isNaN(furiScore) ? (furiScore >= 0 ? '+' : '') + furiScore.toFixed(1) : ''}`
+        : '';
+
       const isAnaba  = !isNaN(oddsV) && oddsV >= 10.0;
       const isHonmei = !isNaN(oddsV) && oddsV > 0 && oddsV < 10.0;
       const anabaOverallScore  = parseFloat(String(r.anaba_overall_score  ?? ''));
@@ -948,8 +961,8 @@
       }
       const anabaOverallParts = buildAnabaParts(r.score_ten, r.score_agari, r.score_ichi, r.score_goal, r.score_combo, r.score_kyakushitsu, r.score_blood);
       const anabaCourseParts  = buildAnabaParts(r.score_ten_c, r.score_agari_c, r.score_ichi_c, r.score_goal_c, r.score_combo_c, r.score_kyakushitsu_c, r.score_blood_c);
-      const anabaOverallTip = ('EX指数（全体）内訳\\n' + anabaOverallParts.join(' / ')).replace(/"/g, '&quot;');
-      const anabaCourseTip  = ('EX指数（コース）内訳\\n' + anabaCourseParts.join(' / ')).replace(/"/g, '&quot;');
+      const anabaOverallTip = ('EX指数（全体）内訳\n' + anabaOverallParts.join(' / ')).replace(/"/g, '&quot;');
+      const anabaCourseTip  = ('EX指数（コース）内訳\n' + anabaCourseParts.join(' / ')).replace(/"/g, '&quot;');
 
       // スコアセル生成
       // 100以上: ピンク背景、50以上: 黄色背景、0~49: 中立、負: グレー
@@ -999,8 +1012,8 @@
       }
       const honmeiOverallParts = buildHonmeiParts(r.hms_score_ten, r.hms_score_agari, r.hms_score_ichi, r.hms_score_goal, r.hms_score_combo, r.hms_score_kyakushitsu, r.hms_score_blood);
       const honmeiCourseParts  = buildHonmeiParts(r.hms_score_ten_c, r.hms_score_agari_c, r.hms_score_ichi_c, r.hms_score_goal_c, r.hms_score_combo_c, r.hms_score_kyakushitsu_c, r.hms_score_blood_c);
-      const honmeiOverallTip = ('本命指数（全体）内訳\\n' + honmeiOverallParts.join(' / ')).replace(/"/g, '&quot;');
-      const honmeiCourseTip  = ('本命指数（コース）内訳\\n' + honmeiCourseParts.join(' / ')).replace(/"/g, '&quot;');
+      const honmeiOverallTip = ('本命指数（全体）内訳\n' + honmeiOverallParts.join(' / ')).replace(/"/g, '&quot;');
+      const honmeiCourseTip  = ('本命指数（コース）内訳\n' + honmeiCourseParts.join(' / ')).replace(/"/g, '&quot;');
       // 本命指数セル生成（odds<10のみ色付き表示）
       function honmeiInner(score, tip) {
         if (!isHonmei || isNaN(score)) return '<span class="anaba-na">—</span>';
@@ -1095,6 +1108,7 @@
           if (!g) return '<span class="sp-c">—</span>';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
+        <td${furiGrade === 'A' ? ' style="background:#fbcfe8"' : furiGrade === 'B' ? ' style="background:#bbf7d0"' : ''}${furiTip ? ` data-tip="${furiTip}"` : ''}>${furiGrade === 'A' ? '<span class="sp-a">A</span>' : furiGrade === 'B' ? '<span class="sp-b">B</span>' : '—'}</td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();

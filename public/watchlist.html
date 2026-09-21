@@ -32,6 +32,7 @@
     .tag-ex     { background: #dc2626; }
     .tag-kyusha { background: #0891b2; }
     .tag-fukusho100 { background: #ca8a04; cursor: help; }
+    .tag-blinker { background: #ec4899; cursor: help; }
 
     .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px; }
     .race-head { font-size: .9rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -92,6 +93,7 @@
     <span><span class="tag tag-ex">EX</span>EX指数(コース)≧100（複勝回収率100%超の帯）</span>
     <span><span class="tag tag-kyusha">厩信頼</span>厩指穴信頼ランク S〜B（複勝回収率100%以上）</span>
     <span><span class="tag tag-fukusho100">複勝100</span>sc≥3×基準オッズ15〜30倍（複勝回収率100.7%・的中率20.0%、n=3,523で検証済み）</span>
+    <span><span class="tag tag-blinker">B指数A</span>ブリンカー初装着/再装着×ブリンカー指数グレードA</span>
   </div>
 
   <div class="search-card">
@@ -137,6 +139,7 @@ function tagsHtml(r) {
   if (r.match_ex) tags.push('<span class="tag tag-ex">EX</span>');
   if (r.match_kyusha) tags.push('<span class="tag tag-kyusha">厩信頼</span>');
   if (r.match_fukusho100) tags.push(`<span class="tag tag-fukusho100" title="複勝回収率100%超シグナル（sc=${r.fukusho_sc}点×オッズ${Number(r.kijun_odds).toFixed(1)}倍）">複勝100</span>`);
+  if (r.match_blinker) tags.push(`<span class="tag tag-blinker" title="${r.blinker_type === '1' ? '初装着' : '再装着'}・ブリンカー指数グレードA">B指数A</span>`);
   return tags.join('');
 }
 
@@ -177,19 +180,30 @@ function render(data) {
     races.get(key).push(r);
   }
 
-  let hitCount = 0, totalWithResult = 0;
+  let hitCount = 0, totalWithResult = 0, winSum = 0, placeSum = 0;
   for (const r of rows) {
     if (r.order_of_finish) {
       totalWithResult++;
-      if (parseInt(r.win_pay) > 0) hitCount++;
+      const win = parseInt(r.win_pay) || 0;
+      const place = parseInt(r.place_pay) || 0;
+      winSum += win;
+      placeSum += place;
+      if (win > 0) hitCount++;
     }
   }
+  // 回収率(%) = 払戻合計 ÷ (結果判明済み件数×100円) × 100 = 払戻合計 ÷ 結果判明済み件数
+  const winRecovery   = totalWithResult > 0 ? (winSum   / totalWithResult).toFixed(1) : null;
+  const placeRecovery = totalWithResult > 0 ? (placeSum / totalWithResult).toFixed(1) : null;
 
   const summaryHtml = totalWithResult > 0
     ? `<div class="summary-bar">
          <span>該当馬数: <b>${rows.length}</b></span>
          <span>結果判明済み: <b>${totalWithResult}</b></span>
          <span>単勝的中: <b>${hitCount}</b></span>
+         <span>単勝合計: <b>${winSum.toLocaleString()}円</b></span>
+         <span>単勝回収率: <b>${winRecovery}%</b></span>
+         <span>複勝合計: <b>${placeSum.toLocaleString()}円</b></span>
+         <span>複勝回収率: <b>${placeRecovery}%</b></span>
        </div>`
     : `<div class="summary-bar"><span>該当馬数: <b>${rows.length}</b>（この開催日はまだ結果が出ていません）</span></div>`;
 
