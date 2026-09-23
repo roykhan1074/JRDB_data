@@ -91,7 +91,6 @@
   <div class="chip-nav">
     <a href="#panel-ex">EX指数帯</a>
     <a href="#panel-honmei">本命指数帯</a>
-    <a href="#panel-furi">不利巻き返し指数</a>
     <a href="#panel-blinker">ブリンカー指数</a>
     <a href="#panel-sc">注目馬複合シグナル(sc)</a>
     <a href="#panel-kyusha">厩指穴信頼</a>
@@ -122,15 +121,6 @@
       <table class="mark-table">
         <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
         <tbody id="tbody-honmei"></tbody>
-      </table>
-    </div>
-
-    <div class="panel" id="panel-furi">
-      <h3>不利巻き返し指数グレード別成績</h3>
-      <div class="desc">前走で不利(T_SED.furi)を受けた馬のうち、EX指数(コース)・上がり指数順位・仕上指数・情報印など他のJRDB指標では既に高評価されていない馬を検出する指数。他指標で既に高評価済みの馬は常にグレードC(スコア0)になる。</div>
-      <table class="mark-table">
-        <thead><tr><th>区分</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
-        <tbody id="tbody-furi"></tbody>
       </table>
     </div>
 
@@ -209,7 +199,6 @@ async function load() {
 function render(data) {
   renderRows('tbody-ex', data.exIndex, r => r.band_label);
   renderRows('tbody-honmei', data.honmeiIndex, r => r.band_label);
-  renderRows('tbody-furi', data.furiIndex || [], r => r.band_label);
   renderRows('tbody-blinker', data.blinkerIndex || [], r => r.band_label);
   renderRows('tbody-sc', data.scIndex || [], r => r.band_label);
   renderRows('tbody-kyusha', data.kyushaTrust, r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);

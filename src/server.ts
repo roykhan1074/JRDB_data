@@ -1509,33 +1509,6 @@ async function computeFactorRecovery() {
      ORDER BY FIELD(grade, 'S','A','B','C','D','E','F')`
   );
 
-  // ── 不利巻き返し指数グレード別（設計: メモリ project_furi_index / project_prev_furi_recovery_analysis）──
-  // hot_flag=1（他指標で既に高評価済み）の馬は常にgrade='C'・score=0になる仕様のため、
-  // T_BLINKER_SCORE と同じくグレード（A/B/C）単位で集計する
-  let furiIndexRows: any[] = [];
-  try {
-  [furiIndexRows] = await pool.query<any>(
-    `SELECT band_key, band_label, ${rateSelect}
-     FROM (
-       SELECT
-         s.grade AS band_key,
-         CASE s.grade WHEN 'A' THEN 'A(高評価)' WHEN 'C' THEN 'C(効果薄)' ELSE 'B(中立)' END AS band_label,
-         (f.order_of_finish = 1)      AS win_flag,
-         (f.order_of_finish <= 2)     AS renso_flag,
-         (f.order_of_finish <= 3)     AS place_flag,
-         COALESCE(f.win_pay, 0)   AS win_pay,
-         COALESCE(f.place_pay, 0) AS place_pay
-       FROM T_FURI_SCORE s
-       INNER JOIN T_ANALYZE_FACT f
-         ON  f.course_code=s.course_code AND f.year_code=s.year_code AND f.kai=s.kai
-         AND f.day_code=s.day_code AND f.race_num=s.race_num AND f.uma_num=s.uma_num
-       WHERE f.order_of_finish IS NOT NULL
-     ) t
-     GROUP BY band_key, band_label
-     ORDER BY band_key`
-  );
-  } catch { /* T_FURI_SCORE 未構築の場合は空配列のまま */ }
-
   // ── ブリンカー指数グレード別（設計: document/指数/ブリンカー指数_仕様書.md）──
   // バックテストにより連続値としての中間解像度は低いことが判明しているため、A/B/C の3段階グレードのみ集計する
   let blinkerIndexRows: any[] = [];
@@ -1572,7 +1545,6 @@ async function computeFactorRecovery() {
     exIndex: exRows as any[],
     honmeiIndex: honmeiRows as any[],
     kyushaTrust: kyushaRows as any[],
-    furiIndex: furiIndexRows as any[],
     blinkerIndex: blinkerIndexRows as any[],
     scIndex: scRows,
     updatedAt: new Date().toISOString(),
