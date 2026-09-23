@@ -61,7 +61,7 @@ racing DB
 | `T_ANABA_FACTOR_AGG` | ファクター別集計 | factor_type + factor_value + course_code + tds_code + dist_band | anaba_index.sql Part3 |
 | `T_ANABA_SCORE` | EX指数（出馬表用） | course_code〜uma_num | anaba_index.sql Part4 |
 
-詳細は [EX指数仕様書](../指数/穴馬指数_仕様書.md) を参照。
+詳細は [EX指数仕様書](../指数/EX指数_仕様書.md) を参照。
 
 ---
 

@@ -26,6 +26,7 @@ const HONMEI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'honmei_index.sql');
 const COURSE_RECOVERY_SQL_FILE = path.join(__dirname, '..', 'sql', 'course_recovery_index.sql');
 const BLINKER_SQL_FILE = path.join(__dirname, '..', 'sql', 'blinker_index.sql');
 const FURI_SQL_FILE    = path.join(__dirname, '..', 'sql', 'furi_index.sql');
+const KYUSHA_SQL_FILE   = path.join(__dirname, '..', 'sql', 'kyusha_analysis.sql');
 
 const PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
@@ -71,6 +72,12 @@ const FURI_PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
   2: 'ファクター集計 (T_FURI_FACTOR_AGG)',
   3: '指数計算 (T_FURI_SCORE)',
+};
+
+const KYUSHA_PART_LABELS: Record<number, string> = {
+  1: 'テーブル定義 (CREATE TABLE)',
+  2: 'ファクトデータ投入 (T_KYUSHA_RACE_LOG)',
+  3: 'ファクター集計 (T_KYUSHA_FACTOR_AGG)',
 };
 
 /** SQLファイルを -- Part N: マーカーで4パートに分割 */
@@ -131,7 +138,7 @@ function runMysqlSql(sql: string): Promise<void> {
 }
 
 /** ETL多重実行防止用ロック。同じ指数のETLが実行中は次のリクエストを即エラーにする。 */
-const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false, furi: false };
+const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false, furi: false, kyusha: false };
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -1169,10 +1176,217 @@ app.get('/api/course-analysis', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// 注目馬複合シグナル(sc)の算出: entries.htmlのevaluateRaceSignals()と同一ロジック。
+// /api/watchlist・指数帯別回収率(sc)の両方から呼ばれる共通実装（ロジックの重複を避ける）。
+// 出典: document/分析レポート/注目馬複合シグナル回収率分析レポート.md
+//       document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md（sc≥6の単勝回収率妥当性を確認）
+// ────────────────────────────────────────────────────────────────────────────
+interface NotableScRow {
+  uma_num: string;
+  kijun_odds: any; honmei_course: any; ex_course: any; joho_index: any; idm: any;
+  goal_juni: any; ten_index_juni: any; agari_index_juni: any;
+  kyakushitsu: any; chokyo_yajirushi: any; oi_index: any;
+  combo_place_rr: any; combo_n: any; kyusha_anaba_place_rr: any; kyusha_anaba_n: any;
+}
+
+function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
+  const horses = raceRows.map(r => {
+    const odds = r.kijun_odds === null ? NaN : Number(r.kijun_odds);
+    const isHonmei = !isNaN(odds) && odds > 0 && odds < 10;
+    const isAnaba = !isNaN(odds) && odds >= 10;
+    const honmei = r.honmei_course === null ? NaN : Number(r.honmei_course);
+    const anaba = r.ex_course === null ? NaN : Number(r.ex_course);
+    const johoRawV = r.joho_index === null ? NaN : Math.trunc(Number(r.joho_index));
+    const joho = (isNaN(johoRawV) || johoRawV === -1) ? null : johoRawV;
+    const idm = Number(r.idm) || 0;
+    const goalJuniV = r.goal_juni === null ? NaN : Number(r.goal_juni);
+    const goalJuni = isNaN(goalJuniV) ? 99 : goalJuniV;
+    const agariJuniV = r.agari_index_juni === null ? NaN : Number(r.agari_index_juni);
+    const agariJuni = isNaN(agariJuniV) ? 99 : agariJuniV;
+    const tenJuniV = r.ten_index_juni === null ? NaN : Number(r.ten_index_juni);
+    const tenJuni = isNaN(tenJuniV) ? 99 : tenJuniV;
+    const style = String(r.kyakushitsu ?? '').trim();
+    const yaji = String(r.chokyo_yajirushi ?? '').trim();
+    const oiIdx = Number(r.oi_index) || 0;
+    const comboPlaceRr = Number(r.combo_place_rr) || 0;
+    const comboN = Number(r.combo_n) || 0;
+    const kyushaRr = Number(r.kyusha_anaba_place_rr) || 0;
+    const kyushaN = Number(r.kyusha_anaba_n) || 0;
+    return { r, odds, isHonmei, isAnaba, honmei, anaba, joho, idm, goalJuni, agariJuni, tenJuni, style, yaji, oiIdx, comboPlaceRr, comboN, kyushaRr, kyushaN };
+  });
+
+  const escCnt = horses.filter(h => h.style === '1').length;
+  const senCnt = horses.filter(h => h.style === '2').length;
+  const frontCnt = escCnt + senCnt;
+  const n = horses.length;
+  const fastPace = frontCnt >= Math.ceil(n * 0.38);
+  const slowPace = escCnt <= 1 && senCnt <= 1;
+
+  const oiSorted = horses.filter(h => h.oiIdx > 0).map(h => h.oiIdx).sort((a, b) => b - a);
+  const oiRankOf = (h: typeof horses[number]) => {
+    if (h.oiIdx <= 0) return 99;
+    const i = oiSorted.indexOf(h.oiIdx);
+    return i === -1 ? 99 : i + 1;
+  };
+  const oiTop25Cutoff = Math.ceil(oiSorted.length * 0.25);
+
+  const validIdms = horses.map(h => h.idm).filter(v => v > 0).sort((a, b) => a - b);
+  const idmMedian = validIdms.length > 0 ? validIdms[Math.floor(validIdms.length / 2)] : 0;
+  const validGoalCnt = horses.filter(h => h.goalJuni < 90).length;
+
+  const result = new Map<string, number>();
+  for (const h of horses) {
+    let sc = 0;
+    const hasIdxSignal = (h.isHonmei && !isNaN(h.honmei) && h.honmei >= 10) || (h.isAnaba && !isNaN(h.anaba) && h.anaba >= 15);
+    const hasAbilityProxy =
+      (h.goalJuni < 90 && validGoalCnt > 0 && h.goalJuni <= Math.ceil(validGoalCnt * 0.45)) ||
+      (h.idm > 0 && h.idm >= idmMedian);
+    const abilityOk = hasIdxSignal || hasAbilityProxy;
+
+    if (h.isHonmei && !isNaN(h.honmei)) {
+      if (h.honmei >= 50) sc += 3; else if (h.honmei >= 30) sc += 2; else if (h.honmei >= 10) sc += 1;
+    }
+    if (h.isAnaba && !isNaN(h.anaba)) {
+      if (h.anaba >= 100) sc += 3; else if (h.anaba >= 50) sc += 2; else if (h.anaba >= 15) sc += 1;
+    }
+    if (abilityOk) {
+      if (h.comboN >= 10 && h.comboPlaceRr >= 130) sc += 3;
+      else if (h.comboN >= 7 && h.comboPlaceRr >= 110) sc += 2;
+      else if (h.comboN >= 5 && h.comboPlaceRr >= 100) sc += 1;
+    }
+    if (abilityOk && h.isAnaba) {
+      if (h.kyushaN >= 10 && h.kyushaRr >= 130) sc += 3;
+      else if (h.kyushaN >= 7 && h.kyushaRr >= 110) sc += 2;
+    }
+    if (h.joho !== null) {
+      const m = abilityOk ? 1 : 0.5;
+      if (h.joho >= 7) sc += Math.round(3 * m); else if (h.joho >= 5) sc += Math.round(2 * m); else if (h.joho >= 3) sc += Math.round(1 * m);
+      if (h.joho >= 5 && h.odds >= 5) sc += Math.round(2 * m);
+    }
+    if (abilityOk) {
+      if (fastPace && (h.style === '3' || h.style === '4')) {
+        if (h.agariJuni <= 2) sc += 2; else if (h.agariJuni <= 4) sc += 1;
+      } else if (slowPace && (h.style === '1' || h.style === '2')) {
+        if (h.tenJuni <= 2) sc += 2; else if (h.tenJuni <= 4) sc += 1;
+      }
+    }
+    if (h.yaji === '4' || h.yaji === '5') {
+      sc -= 2;
+    } else if (abilityOk) {
+      if (h.yaji === '1') sc += 2; else if (h.yaji === '2') sc += 1;
+      const myOiRank = oiRankOf(h);
+      if (oiTop25Cutoff > 0 && myOiRank <= oiTop25Cutoff) sc += 1;
+    }
+    if (abilityOk && h.goalJuni <= 2) sc += 1;
+
+    result.set(h.r.uma_num, sc);
+  }
+  return result;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // 指数帯別回収率API: EX指数帯・本命指数帯・厩指穴信頼グレード別の回収率集計
 // ────────────────────────────────────────────────────────────────────────────
 
-let factorRecoveryCache: { exIndex: any[]; honmeiIndex: any[]; kyushaTrust: any[]; courseRecovery: any[]; blinkerIndex: any[]; updatedAt: string } | null = null;
+let factorRecoveryCache: { exIndex: any[]; honmeiIndex: any[]; kyushaTrust: any[]; furiIndex: any[]; blinkerIndex: any[]; scIndex: any[]; updatedAt: string } | null = null;
+
+// ── sc(注目馬複合シグナル)帯別の回収率集計 ──
+// T_ANALYZE_FACTにはjoho_index生値・chokyo_yajirushi・combo/kyusha統計が無いため、
+// T_KYI等の元テーブルから直接JOINしてレース単位でscを計算する。
+async function computeScRecovery(): Promise<any[]> {
+  const [rows] = await pool.query<any>(
+    `SELECT k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
+            k.kijun_odds, k.joho_index, k.idm, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
+            k.kyakushitsu, k.chokyo_yajirushi,
+            c.oi_index,
+            cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
+            kya.anaba_place_rr AS kyusha_anaba_place_rr, kya.anaba_n AS kyusha_anaba_n,
+            ans.course_score AS ex_course,
+            hms.course_score AS honmei_course,
+            s.order_of_finish, s.win AS win_pay, s.place AS place_pay, s.ijou_kubun
+     FROM T_KYI k
+     JOIN T_BAC b
+       ON  b.course_code = k.course_code AND b.year_code = k.year_code
+       AND b.kai = k.kai AND b.day_code = k.day_code AND b.race_num = k.race_num
+     LEFT JOIN T_CYB c
+       ON  c.course_code = k.course_code AND c.year_code = k.year_code
+       AND c.kai = k.kai AND c.day_code = k.day_code AND c.race_num = k.race_num AND c.uma_num = k.uma_num
+     LEFT JOIN T_COMBO_RECOVERY cr
+       ON  cr.kishu_code = k.kishu_code AND cr.trainer_code = k.trainer_code
+     LEFT JOIN (
+       SELECT trainer_code,
+              ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
+              SUM(total_count)                                    AS anaba_n
+       FROM T_KYUSHA_FACTOR_AGG
+       WHERE factor_type = 'kyusha_idx_x_odds' AND factor_value = 'plus_15~'
+       GROUP BY trainer_code
+     ) kya ON kya.trainer_code = k.trainer_code
+     LEFT JOIN T_ANABA_SCORE ans
+       ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
+       AND ans.kai = k.kai AND ans.day_code = k.day_code AND ans.race_num = k.race_num AND ans.uma_num = k.uma_num
+     LEFT JOIN T_HONMEI_SCORE hms
+       ON  hms.course_code = k.course_code AND hms.year_code = k.year_code
+       AND hms.kai = k.kai AND hms.day_code = k.day_code AND hms.race_num = k.race_num AND hms.uma_num = k.uma_num
+     JOIN T_SED s
+       ON  s.course_code = k.course_code AND s.year_code = k.year_code
+       AND s.kai = k.kai AND s.day_code = k.day_code AND s.race_num = k.race_num AND s.umaban = k.uma_num
+     WHERE s.order_of_finish IS NOT NULL`
+  );
+
+  const raceGroups = new Map<string, any[]>();
+  for (const r of rows as any[]) {
+    const raceKey = `${r.course_code}_${r.year_code}_${r.kai}_${r.day_code}_${r.race_num}`;
+    if (!raceGroups.has(raceKey)) raceGroups.set(raceKey, []);
+    raceGroups.get(raceKey)!.push(r);
+  }
+
+  const bands: { key: string; label: string; test: (sc: number) => boolean }[] = [
+    { key: '1', label: '2以下',              test: sc => sc <= 2 },
+    { key: '2', label: '3〜5',               test: sc => sc >= 3 && sc <= 5 },
+    { key: '3', label: '6〜7(採用帯)',        test: sc => sc >= 6 && sc <= 7 },
+    { key: '4', label: '8以上',               test: sc => sc >= 8 },
+  ];
+  type Bucket = { total: number; win: number; renso: number; place: number; winPay: number; placePay: number };
+  const buckets = new Map<string, Bucket>();
+
+  for (const raceRs of raceGroups.values()) {
+    const scMap = computeNotableScMap(raceRs as NotableScRow[]);
+    for (const r of raceRs) {
+      const sc = scMap.get(r.uma_num) ?? 0;
+      const band = bands.find(b => b.test(sc));
+      if (!band) continue;
+      const finish = parseInt(String(r.order_of_finish ?? '').trim());
+      if (isNaN(finish)) continue;
+      const normal = r.ijou_kubun === '0' || r.ijou_kubun === '' || r.ijou_kubun === null;
+      const winPay = normal ? (Number(r.win_pay) || 0) : 0;
+      const placePay = normal ? (Number(r.place_pay) || 0) : 0;
+      const b = buckets.get(band.key) ?? { total: 0, win: 0, renso: 0, place: 0, winPay: 0, placePay: 0 };
+      b.total += 1;
+      if (finish === 1) b.win += 1;
+      if (finish <= 2) b.renso += 1;
+      if (finish <= 3) b.place += 1;
+      b.winPay += winPay;
+      b.placePay += placePay;
+      buckets.set(band.key, b);
+    }
+  }
+
+  return bands
+    .filter(b => buckets.has(b.key))
+    .map(b => {
+      const bk = buckets.get(b.key)!;
+      return {
+        band_key: b.key, band_label: b.label,
+        total_count: bk.total,
+        win_count: bk.win, renso_count: bk.renso, place_count: bk.place,
+        win_rate:   Math.round(bk.win   / bk.total * 1000) / 10,
+        renso_rate: Math.round(bk.renso / bk.total * 1000) / 10,
+        place_rate: Math.round(bk.place / bk.total * 1000) / 10,
+        win_recovery:   Math.round(bk.winPay   / bk.total * 10) / 10,
+        place_recovery: Math.round(bk.placePay / bk.total * 10) / 10,
+      };
+    });
+}
 
 async function computeFactorRecovery() {
   const rateSelect = `
@@ -1295,47 +1509,32 @@ async function computeFactorRecovery() {
      ORDER BY FIELD(grade, 'S','A','B','C','D','E','F')`
   );
 
-  // ── コース回収率指数帯（ハイブリッド版。設計: document/分析レポート/コース回収率指数_設計とバックテストレポート.md）──
-  // T_COURSE_RECOVERY_SCORE が未構築（ETL未実行）の環境でも他の指数帯表示が壊れないようtry/catchで保護する
-  let courseRecoveryRows: any[] = [];
+  // ── 不利巻き返し指数グレード別（設計: メモリ project_furi_index / project_prev_furi_recovery_analysis）──
+  // hot_flag=1（他指標で既に高評価済み）の馬は常にgrade='C'・score=0になる仕様のため、
+  // T_BLINKER_SCORE と同じくグレード（A/B/C）単位で集計する
+  let furiIndexRows: any[] = [];
   try {
-  [courseRecoveryRows] = await pool.query<any>(
+  [furiIndexRows] = await pool.query<any>(
     `SELECT band_key, band_label, ${rateSelect}
      FROM (
        SELECT
-         CASE
-           WHEN s.score >= 30  THEN '1'
-           WHEN s.score >= 20  THEN '2'
-           WHEN s.score >= 10  THEN '3'
-           WHEN s.score >= 0   THEN '4'
-           WHEN s.score >= -10 THEN '5'
-           WHEN s.score >= -20 THEN '6'
-           ELSE '7'
-         END AS band_key,
-         CASE
-           WHEN s.score >= 30  THEN '30以上'
-           WHEN s.score >= 20  THEN '20〜29'
-           WHEN s.score >= 10  THEN '10〜19'
-           WHEN s.score >= 0   THEN '0〜9'
-           WHEN s.score >= -10 THEN '-1〜-10'
-           WHEN s.score >= -20 THEN '-11〜-20'
-           ELSE '-21以下'
-         END AS band_label,
+         s.grade AS band_key,
+         CASE s.grade WHEN 'A' THEN 'A(高評価)' WHEN 'C' THEN 'C(効果薄)' ELSE 'B(中立)' END AS band_label,
          (f.order_of_finish = 1)      AS win_flag,
          (f.order_of_finish <= 2)     AS renso_flag,
          (f.order_of_finish <= 3)     AS place_flag,
          COALESCE(f.win_pay, 0)   AS win_pay,
          COALESCE(f.place_pay, 0) AS place_pay
-       FROM T_COURSE_RECOVERY_SCORE s
+       FROM T_FURI_SCORE s
        INNER JOIN T_ANALYZE_FACT f
          ON  f.course_code=s.course_code AND f.year_code=s.year_code AND f.kai=s.kai
          AND f.day_code=s.day_code AND f.race_num=s.race_num AND f.uma_num=s.uma_num
-       WHERE s.score IS NOT NULL AND f.order_of_finish IS NOT NULL
+       WHERE f.order_of_finish IS NOT NULL
      ) t
      GROUP BY band_key, band_label
      ORDER BY band_key`
   );
-  } catch { /* T_COURSE_RECOVERY_SCORE 未構築の場合は空配列のまま */ }
+  } catch { /* T_FURI_SCORE 未構築の場合は空配列のまま */ }
 
   // ── ブリンカー指数グレード別（設計: document/指数/ブリンカー指数_仕様書.md）──
   // バックテストにより連続値としての中間解像度は低いことが判明しているため、A/B/C の3段階グレードのみ集計する
@@ -1364,12 +1563,18 @@ async function computeFactorRecovery() {
   );
   } catch { /* T_BLINKER_SCORE 未構築の場合は空配列のまま */ }
 
+  // ── sc(注目馬複合シグナル)帯別（設計: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md）──
+  let scRows: any[] = [];
+  try { scRows = await computeScRecovery(); }
+  catch { /* 元テーブル未構築等の場合は空配列のまま */ }
+
   return {
     exIndex: exRows as any[],
     honmeiIndex: honmeiRows as any[],
     kyushaTrust: kyushaRows as any[],
-    courseRecovery: courseRecoveryRows as any[],
+    furiIndex: furiIndexRows as any[],
     blinkerIndex: blinkerIndexRows as any[],
+    scIndex: scRows,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1441,9 +1646,11 @@ app.get('/api/watchlist', async (req, res) => {
             b.race_name, b.race_name_9char, b.start_time, b.distance, b.tds_code, b.heads, b.grade AS race_grade,
             k.uma_num, k.waku_num, k.uma_name, k.kishu_name, k.trainer_name, k.trainer_code,
             k.kijun_odds, k.kijun_ninki, k.kyusha_index,
-            k.joho_index, k.goal_juni, k.ten_index_juni, k.agari_index_juni, k.blinker,
+            k.joho_index, k.idm, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
+            k.kyakushitsu, k.chokyo_yajirushi, k.blinker,
             c.oi_index, c.shiage_index,
             cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
+            kya.anaba_place_rr AS kyusha_anaba_place_rr, kya.anaba_n AS kyusha_anaba_n,
             ans.course_score  AS ex_course,
             ans.overall_score AS ex_overall,
             hms.course_score  AS honmei_course,
@@ -1461,6 +1668,15 @@ app.get('/api/watchlist', async (req, res) => {
      LEFT JOIN T_COMBO_RECOVERY cr
        ON  cr.kishu_code   = k.kishu_code
        AND cr.trainer_code = k.trainer_code
+     LEFT JOIN (
+       SELECT trainer_code,
+              ROUND(SUM(place_payout_sum) / SUM(total_count), 1) AS anaba_place_rr,
+              SUM(total_count)                                    AS anaba_n
+       FROM T_KYUSHA_FACTOR_AGG
+       WHERE factor_type = 'kyusha_idx_x_odds'
+         AND factor_value = 'plus_15~'
+       GROUP BY trainer_code
+     ) kya ON kya.trainer_code = k.trainer_code
      LEFT JOIN T_ANABA_SCORE ans
        ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
        AND ans.kai = k.kai AND ans.day_code = k.day_code
@@ -1501,6 +1717,22 @@ app.get('/api/watchlist', async (req, res) => {
     const rankMap = new Map<number, number>();
     uniqueVals.forEach((v, i) => rankMap.set(v, i + 1));
     johoRankLookup.set(raceKey, rankMap);
+  }
+
+  // ── 注目馬複合シグナル(sc): computeNotableScMap()（entries.htmlのevaluateRaceSignals()と同一ロジック）を
+  //    レース単位で呼び出す。出典: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md
+  const notableScByKey = new Map<string, number>();
+  {
+    const raceRows = new Map<string, any[]>();
+    for (const r of rows as any[]) {
+      const raceKey = `${r.course_code}_${r.kai}_${r.day_code}_${r.race_num}`;
+      if (!raceRows.has(raceKey)) raceRows.set(raceKey, []);
+      raceRows.get(raceKey)!.push(r);
+    }
+    for (const [raceKey, raceRs] of raceRows) {
+      const scMap = computeNotableScMap(raceRs as NotableScRow[]);
+      for (const [umaNum, sc] of scMap) notableScByKey.set(`${raceKey}_${umaNum}`, sc);
+    }
   }
 
   const result = (rows as any[])
@@ -1557,7 +1789,12 @@ app.get('/api/watchlist', async (req, res) => {
       const fukushoSc = scIdx + scIdxStrong + scCombo + scChokyo + scGoal + scJoho + scTa;
       const matchFukusho100 = fukushoSc >= 3 && odds !== null && odds >= 15 && odds < 30;
 
-      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100 && !matchBlinker) return null;
+      // 注目馬複合シグナル(sc≥6): walk-forward検証で学習期間・2024・2025・2026の4期間すべて単勝回収率100%超を確認済み
+      // 出典: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md 第5章
+      const notableSc = notableScByKey.get(`${raceKey}_${r.uma_num}`) ?? 0;
+      const matchNotable = notableSc >= 6;
+
+      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100 && !matchBlinker && !matchNotable) return null;
 
       return {
         course_code: r.course_code, year_code: r.year_code, kai: r.kai, day_code: r.day_code, race_num: r.race_num,
@@ -1570,6 +1807,7 @@ app.get('/api/watchlist', async (req, res) => {
         match_honmei: matchHonmei, match_ex: matchEx, match_kyusha: matchKyusha,
         match_fukusho100: matchFukusho100, fukusho_sc: matchFukusho100 ? fukushoSc : null,
         match_blinker: matchBlinker, blinker_type: blinkerType, blinker_grade: blinkerGrade,
+        match_notable: matchNotable, notable_sc: matchNotable ? notableSc : null,
         order_of_finish: r.order_of_finish, win_pay: r.win_pay, place_pay: r.place_pay, ijou_kubun: r.ijou_kubun,
       };
     })
@@ -2147,6 +2385,88 @@ app.post('/api/furi-etl', (req, res) => {
       res.end();
     } finally {
       etlLocks.furi = false;
+    }
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 厩指穴信頼グレード ETL: POST /api/kyusha-etl
+// kyusha_analysis.sql を3パートに分割して順次実行。SSEで進捗を返す。
+// 他の指数と異なり馬ごとのスコアテーブルは持たず、T_KYUSHA_FACTOR_AGG（調教師別集計）を
+// getTrainerGradeMap()・computeFactorRecovery()がクエリ時にS〜F判定するため、
+// 完了後はその2つのメモリキャッシュをクリアしてグレードを即時反映させる。
+// 設計: document/指数/厩指穴信頼_仕様書.md
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/kyusha-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.kyusha) {
+    send('エラー: 厩指穴信頼ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.kyusha = true;
+
+  (async () => {
+    try {
+      if (!fs.existsSync(KYUSHA_SQL_FILE)) {
+        send('エラー: sql/kyusha_analysis.sql が見つかりません', { error: true, done: true });
+        res.end(); return;
+      }
+      const sql = fs.readFileSync(KYUSHA_SQL_FILE, 'utf-8');
+      const parts = splitSqlByParts(sql);
+
+      for (let i = 0; i < parts.length; i++) {
+        const partNum = i + 1;
+        const label = KYUSHA_PART_LABELS[partNum] ?? `Part${partNum}`;
+        send(`[Part${partNum}] ${label} 開始...`);
+
+        let heartbeat: NodeJS.Timeout | undefined;
+        if (partNum >= 2) {
+          let elapsed = 0;
+          heartbeat = setInterval(() => {
+            elapsed += 15;
+            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
+          }, 15_000);
+        }
+
+        try {
+          await runMysqlSql(parts[i]);
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] ${label} 完了`);
+        } catch (err: any) {
+          if (heartbeat) clearInterval(heartbeat);
+          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+          res.end(); return;
+        }
+      }
+
+      try {
+        const [[row]] = await pool.query<any>(
+          'SELECT COUNT(*) AS cnt FROM T_KYUSHA_FACTOR_AGG'
+        );
+        send(`完了: T_KYUSHA_FACTOR_AGG ${Number(row.cnt).toLocaleString()} 件`);
+      } catch { /* 無視 */ }
+
+      // 厩指穴信頼グレードは馬ごとの事前計算スコアではなく、getTrainerGradeMap()・
+      // computeFactorRecovery()がT_KYUSHA_FACTOR_AGGをクエリ時に集計してS〜F判定する方式。
+      // メモリキャッシュを持っているため、ETL後はここでクリアして即座に反映させる。
+      trainerGradeCache = null;
+      factorRecoveryCache = null;
+      send('厩指穴信頼グレードのキャッシュをクリアしました（出馬表・ウォッチリストに即時反映されます）');
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.kyusha = false;
     }
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);

@@ -7,12 +7,13 @@
   <title>JRDB データ取込</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; }
+    body { font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; }
+
+    header { background: #1a1a2e; color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 1.3rem; font-weight: 600; color: #fff; margin-bottom: 0; }
 
     .back-link {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-size: .85rem; color: #3498db; text-decoration: none;
-      margin-bottom: 20px;
+      font-size: .85rem; color: #7ec8e3; text-decoration: none;
     }
     .back-link:hover { text-decoration: underline; }
 
@@ -119,8 +120,12 @@
   <link rel="stylesheet" href="/race-insight.css">
 </head>
 <body>
-<div class="container">
+<header>
+  <h1>📥 データ取込</h1>
   <a class="back-link" href="/">← RACE INSIGHT</a>
+</header>
+
+<div class="container">
   <h1>JRDB データ取込</h1>
 
   <div class="card">
@@ -296,6 +301,26 @@
 
   <div class="card" id="furi-log-card" style="padding:0; overflow:hidden; display:none">
     <div class="log-area" id="furi-log-area"></div>
+  </div>
+
+  <!-- 厩指穴信頼グレードETL -->
+  <h1 style="margin-top:32px">厩指穴信頼グレード 更新</h1>
+  <div class="card">
+    <p style="font-size:.88rem;color:#555;margin-bottom:16px;line-height:1.7">
+      厩舎指数≧0×基準オッズ≧15倍セグメントでの調教師別成績（T_KYUSHA_RACE_LOG / T_KYUSHA_FACTOR_AGG）を最新データで再集計します。<br>
+      グレード（S〜F）自体は出馬表表示時にこの集計から都度算出されるため、他の指数のような専用スコアテーブルはありません。<br>
+      <span style="color:#d97706;font-weight:600">推奨実行タイミング: 毎週木曜日（T_SED正式版の確定後）。詳細: document/指数/厩指穴信頼_仕様書.md</span>
+    </p>
+    <button class="btn-run" id="btn-kyusha" style="max-width:280px">厩指穴信頼グレードを更新する</button>
+  </div>
+
+  <div class="status-bar" id="kyusha-status-bar">
+    <div class="spinner" id="kyusha-spinner"></div>
+    <span id="kyusha-status-text"></span>
+  </div>
+
+  <div class="card" id="kyusha-log-card" style="padding:0; overflow:hidden; display:none">
+    <div class="log-area" id="kyusha-log-area"></div>
   </div>
 </div>
 
@@ -971,6 +996,76 @@
       fiAppend('エラー: ' + err.message, 'error');
     } finally {
       fiBtn.disabled = false;
+    }
+  });
+
+  // ── 厩指穴信頼グレード ETL ──────────────────────────────
+  const kyLog   = document.getElementById('kyusha-log-area');
+  const kyCard  = document.getElementById('kyusha-log-card');
+  const kyBar   = document.getElementById('kyusha-status-bar');
+  const kySpin  = document.getElementById('kyusha-spinner');
+  const kyText  = document.getElementById('kyusha-status-text');
+  const kyBtn   = document.getElementById('btn-kyusha');
+
+  function kyAppend(msg, cls) {
+    if (!kyCard.style.display || kyCard.style.display === 'none') kyCard.style.display = '';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    kyLog.appendChild(line);
+    kyLog.scrollTop = kyLog.scrollHeight;
+  }
+
+  function kyStatus(state, text) {
+    kyBar.className = 'status-bar ' + state;
+    kyText.textContent = text;
+    kySpin.style.display = state === 'running' ? '' : 'none';
+  }
+
+  kyBtn.addEventListener('click', async () => {
+    kyBtn.disabled = true;
+    kyLog.textContent = '';
+    kyCard.style.display = '';
+    kyStatus('running', '厩指穴信頼グレードを更新中...');
+    kyAppend('厩指穴信頼グレード ETL 開始', 'info');
+
+    try {
+      const res = await fetch('/api/kyusha-etl', { method: 'POST' });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = JSON.parse(line.slice(5).trim());
+          if (payload.message) {
+            const cls = payload.error ? 'error'
+                      : payload.message.includes('処理中') ? 'skip'
+                      : payload.message.includes('完了') ? 'ok'
+                      : payload.message.includes('エラー') ? 'error'
+                      : 'info';
+            kyAppend(payload.message, cls);
+          }
+          if (payload.done) {
+            if (payload.error) {
+              kyStatus('error', 'エラーが発生しました');
+            } else {
+              kyStatus('done', '厩指穴信頼グレードの更新が完了しました');
+              kyAppend('[完了] 出馬表・ウォッチリスト・回収率分析ページに新しいグレードが反映されます', 'done');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      kyStatus('error', 'エラー: ' + err.message);
+      kyAppend('エラー: ' + err.message, 'error');
+    } finally {
+      kyBtn.disabled = false;
     }
   });
 </script>

@@ -7,6 +7,26 @@
 
 
 
+/* ------------------------------------------------------------
+   文字種別フォント切り替え（'RaceInsightUI'）
+   欧文・数字は Segoe UI（Apple系サイトのような丸みのあるプロポーショナル書体）、
+   和文は BIZ UDGothic（従来通りの見慣れた字形）を使う。
+   unicode-range で文字ごとに自動振り分けられるため、1つの font-family 名を
+   指定するだけで「英数字は新フォント・日本語は旧フォント」が両立する。
+   ------------------------------------------------------------ */
+@font-face {
+  font-family: 'RaceInsightUI';
+  src: local('Segoe UI'), local('Helvetica Neue'), local('Arial');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F,
+                 U+2074, U+20AC, U+2122, U+2190-2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'RaceInsightUI';
+  src: local('BIZ UDGothic'), local('BIZ UD Gothic'),
+       local('Hiragino Kaku Gothic ProN'), local('Hiragino Sans'), local('Meiryo');
+  unicode-range: U+3000-30FF, U+31F0-31FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
+}
+
 /* Page backgrounds */
 body { background: #f5f5f7 !important; }
 

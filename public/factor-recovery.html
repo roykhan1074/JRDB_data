@@ -7,7 +7,7 @@
   <title>指数帯別回収率 - RACE INSIGHT</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+    body { font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
 
     header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
     .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
@@ -15,11 +15,25 @@
 
     main { max-width: 900px; margin: 20px auto; padding: 0 16px; }
 
-    .page-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
-    .page-sub   { font-size: .8rem; color: #777; margin-bottom: 16px; }
+    .page-sub {
+      font-size: 1rem; font-weight: 600; color: #1a1a2e;
+      margin-bottom: 4px; line-height: 1.5;
+    }
+    .page-lead {
+      font-size: .82rem; color: #888; margin-bottom: 16px;
+    }
 
+    .chip-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+    .chip-nav a {
+      font-size: .78rem; color: #0071e3; background: #eaf3fd;
+      padding: 6px 14px; border-radius: 999px; text-decoration: none;
+      font-weight: 600; transition: background .15s, transform .15s;
+    }
+    .chip-nav a:hover { background: #d7e9fb; transform: translateY(-1px); }
+
+    .toolbar-wrap { margin-bottom: 20px; }
     .toolbar {
-      display: flex; align-items: center; gap: 12px; margin-bottom: 18px;
+      display: flex; align-items: center; gap: 12px; margin-bottom: 6px;
     }
     .btn-run {
       background: #0071e3; color: #fff; border: none; border-radius: 6px;
@@ -28,8 +42,9 @@
     }
     .btn-run:disabled { background: #aaa; cursor: not-allowed; }
     .updated-at { font-size: .78rem; color: #888; }
+    .toolbar-hint { font-size: .74rem; color: #aaa; }
 
-    .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 18px; }
+    .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 18px; scroll-margin-top: 16px; }
     .panel h3 { font-size: .85rem; color: #333; margin-bottom: 4px; }
     .panel .desc { font-size: .74rem; color: #888; margin-bottom: 12px; }
 
@@ -71,17 +86,28 @@
 </header>
 
 <main>
-  <div class="page-title">EX指数帯・本命指数帯・コース回収率指数帯・ブリンカー指数グレード・厩指穴信頼グレード別 回収率</div>
-  <div class="page-sub">全期間データを集計。新しいレースデータを取り込んだ後は「再集計」を押してください。</div>
+  <div class="page-sub">指数・グレード帯別の回収率を横断チェック</div>
+  <div class="page-lead">気になる指数をタップすると、該当セクションにジャンプします</div>
+  <div class="chip-nav">
+    <a href="#panel-ex">EX指数帯</a>
+    <a href="#panel-honmei">本命指数帯</a>
+    <a href="#panel-furi">不利巻き返し指数</a>
+    <a href="#panel-blinker">ブリンカー指数</a>
+    <a href="#panel-sc">注目馬複合シグナル(sc)</a>
+    <a href="#panel-kyusha">厩指穴信頼</a>
+  </div>
 
-  <div class="toolbar">
-    <button class="btn-run" id="btn-refresh">🔄 再集計</button>
-    <span class="updated-at" id="updated-at"></span>
+  <div class="toolbar-wrap">
+    <div class="toolbar">
+      <button class="btn-run" id="btn-refresh">🔄 再集計</button>
+      <span class="updated-at" id="updated-at"></span>
+    </div>
+    <div class="toolbar-hint">全期間データが対象です。新しいレースデータを取り込んだ後は「再集計」を押してください</div>
   </div>
 
   <div id="msg" class="msg">読み込み中...</div>
   <div id="result" class="hidden">
-    <div class="panel">
+    <div class="panel" id="panel-ex">
       <h3>EX指数帯別成績</h3>
       <div class="desc">出走馬中EX指数（anaba_course_score）の帯域別。基準オッズ≧10倍の馬のみ対象（EX指数の設計上、穴馬向け指数のため）</div>
       <table class="mark-table">
@@ -90,7 +116,7 @@
       </table>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panel-honmei">
       <h3>本命指数帯別成績</h3>
       <div class="desc">本命指数（honmei_course_score）の帯域別。基準オッズ＜10倍の馬のみ対象</div>
       <table class="mark-table">
@@ -99,16 +125,16 @@
       </table>
     </div>
 
-    <div class="panel">
-      <h3>コース回収率指数帯別成績</h3>
-      <div class="desc">脚質・テン指数順位・上がり指数順位・IDM印・情報印・厩舎指数帯・枠番の全体回収率偏差＋コース平均回収率補正（ハイブリッド版）。全出走馬対象。設計: document/分析レポート/コース回収率指数_設計とバックテストレポート.md</div>
+    <div class="panel" id="panel-furi">
+      <h3>不利巻き返し指数グレード別成績</h3>
+      <div class="desc">前走で不利(T_SED.furi)を受けた馬のうち、EX指数(コース)・上がり指数順位・仕上指数・情報印など他のJRDB指標では既に高評価されていない馬を検出する指数。他指標で既に高評価済みの馬は常にグレードC(スコア0)になる。</div>
       <table class="mark-table">
-        <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
-        <tbody id="tbody-course-recovery"></tbody>
+        <thead><tr><th>区分</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-furi"></tbody>
       </table>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panel-blinker">
       <h3>ブリンカー指数グレード別成績</h3>
       <div class="desc">初装着・再装着馬のコース適性・クラス・脚質・性別・ローテーション・枠番・IDM順位・テン指数順位・上がり指数順位の回収率偏差から算出。バックテストで中間解像度が低いことが判明しているためA/B/Cの3段階グレードのみ集計（詳細: document/指数/ブリンカー指数_仕様書.md）</div>
       <table class="mark-table">
@@ -117,7 +143,16 @@
       </table>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="panel-sc">
+      <h3>注目馬複合シグナル(sc)帯別成績</h3>
+      <div class="desc">entries.htmlの推奨買い目が使う複合シグナルスコア(sc)の帯域別・単勝回収率基準。⚠ 下表は他の指数帯と同様、combo・kyushaの現在値を過去全期間に遡って適用した集計のため、先読みバイアスにより回収率が過大表示される（特にsc≥6帯）。実際にウォッチリストで採用しているsc≥6の閾値は、日単位walk-forward検証（先読み排除）で学習期間・2024・2025・2026年の4区間すべて単勝回収率100〜114%程度であることを確認済み。詳細: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md</div>
+      <table class="mark-table">
+        <thead><tr><th>スコア帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-sc"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="panel-kyusha">
       <h3>厩指穴信頼グレード別成績</h3>
       <div class="desc">厩舎指数≧0×基準オッズ≧15倍セグメントでの厩舎別信頼度グレード（S〜F、n≧20の厩舎のみ）。出馬表の「厩指穴信頼」列と同じグレード定義</div>
       <table class="mark-table">
@@ -174,8 +209,9 @@ async function load() {
 function render(data) {
   renderRows('tbody-ex', data.exIndex, r => r.band_label);
   renderRows('tbody-honmei', data.honmeiIndex, r => r.band_label);
-  renderRows('tbody-course-recovery', data.courseRecovery || [], r => r.band_label);
+  renderRows('tbody-furi', data.furiIndex || [], r => r.band_label);
   renderRows('tbody-blinker', data.blinkerIndex || [], r => r.band_label);
+  renderRows('tbody-sc', data.scIndex || [], r => r.band_label);
   renderRows('tbody-kyusha', data.kyushaTrust, r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);
 
   const updated = new Date(data.updatedAt);
@@ -189,7 +225,7 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
   const btn = document.getElementById('btn-refresh');
   btn.disabled = true;
   btn.textContent = '再集計中...';
-  document.getElementById('msg').textContent = '再集計中...(数秒〜十数秒かかります)';
+  document.getElementById('msg').textContent = '再集計中...(sc帯集計を含むため1分前後かかります)';
   document.getElementById('msg').classList.remove('err', 'hidden');
   document.getElementById('result').classList.add('hidden');
   try {

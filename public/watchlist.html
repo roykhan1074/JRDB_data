@@ -7,7 +7,7 @@
   <title>ウォッチリスト - RACE INSIGHT</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'BIZ UDGothic','BIZ UD Gothic',sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+    body { font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
 
     header { background: #1a1a2e; color: #fff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
     .back-link { font-size: .85rem; color: #7ec8e3; text-decoration: none; }
@@ -33,6 +33,7 @@
     .tag-kyusha { background: #0891b2; }
     .tag-fukusho100 { background: #ca8a04; cursor: help; }
     .tag-blinker { background: #ec4899; cursor: help; }
+    .tag-notable { background: #7c3aed; cursor: help; }
 
     .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px; }
     .race-head { font-size: .9rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -94,6 +95,7 @@
     <span><span class="tag tag-kyusha">厩信頼</span>厩指穴信頼ランク S〜B（複勝回収率100%以上）</span>
     <span><span class="tag tag-fukusho100">複勝100</span>sc≥3×基準オッズ15〜30倍（複勝回収率100.7%・的中率20.0%、n=3,523で検証済み）</span>
     <span><span class="tag tag-blinker">B指数A</span>ブリンカー初装着/再装着×ブリンカー指数グレードA</span>
+    <span><span class="tag tag-notable">複合注目</span>注目馬複合シグナルsc≥6（単勝回収率、walk-forward検証で4期間すべて100%超）</span>
   </div>
 
   <div class="search-card">
@@ -140,6 +142,7 @@ function tagsHtml(r) {
   if (r.match_kyusha) tags.push('<span class="tag tag-kyusha">厩信頼</span>');
   if (r.match_fukusho100) tags.push(`<span class="tag tag-fukusho100" title="複勝回収率100%超シグナル（sc=${r.fukusho_sc}点×オッズ${Number(r.kijun_odds).toFixed(1)}倍）">複勝100</span>`);
   if (r.match_blinker) tags.push(`<span class="tag tag-blinker" title="${r.blinker_type === '1' ? '初装着' : '再装着'}・ブリンカー指数グレードA">B指数A</span>`);
+  if (r.match_notable) tags.push(`<span class="tag tag-notable" title="注目馬複合シグナル sc=${r.notable_sc}点（sc≥6は単勝回収率101〜114%、walk-forward検証済み）">複合注目</span>`);
   return tags.join('');
 }
 

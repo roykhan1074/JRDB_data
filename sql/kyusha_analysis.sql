@@ -125,9 +125,20 @@ CREATE TABLE IF NOT EXISTS T_KYUSHA_FACTOR_AGG (
   COMMENT='厩舎ファクター別集計（出馬表・信頼度スコア表示用）';
 
 -- 既存テーブルにカバリングインデックスが無ければ追加
-ALTER TABLE T_KYUSHA_FACTOR_AGG
-  ADD INDEX IF NOT EXISTS idx_kyusha_anaba_covering
-    (factor_type, factor_value, trainer_code, total_count, place_payout_sum);
+-- MySQLの ALTER TABLE は ADD INDEX IF NOT EXISTS 構文をサポートしないため
+-- （実行時にERROR 1064で確認済み）、information_schema.STATISTICSで存在確認してから
+-- 動的SQLで実行する（sql/furi_index.sqlと同じ冪等化パターン）。
+SET @idx_exists = (
+  SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'T_KYUSHA_FACTOR_AGG'
+    AND INDEX_NAME = 'idx_kyusha_anaba_covering'
+);
+SET @ddl_idx = IF(@idx_exists = 0,
+  'ALTER TABLE T_KYUSHA_FACTOR_AGG ADD INDEX idx_kyusha_anaba_covering (factor_type, factor_value, trainer_code, total_count, place_payout_sum)',
+  'SELECT 1');
+PREPARE stmt_idx FROM @ddl_idx;
+EXECUTE stmt_idx;
+DEALLOCATE PREPARE stmt_idx;
 
 
 -- ============================================================

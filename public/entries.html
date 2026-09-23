@@ -7,7 +7,7 @@
   <title>出馬表 - RACE INSIGHT</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
+    body { font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
 
     header {
       background: #1a1a2e; color: #fff;
@@ -82,7 +82,7 @@
     /* Table */
     .table-wrap { overflow-x: auto; }
     table, tbody, thead, td, th {
-      font-family: 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
+      font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
     }
     table {
       width: max-content; border-collapse: collapse;
@@ -120,7 +120,7 @@
     /* 調教指数（追切・仕上）*/
     .training-good { color: #dc2626; font-weight: 600; }
     .training-bad  { color: #7c3aed; font-weight: 600; }
-    .idx-col  { text-align: center; padding-left: 2px !important; padding-right: 2px !important; width: 28px; }
+    .idx-col  { text-align: center; padding-left: 2px !important; padding-right: 2px !important; }
     .rank-col { text-align: center; padding-left: 4px !important; padding-right: 4px !important; }
     .mark-col-w { text-align: center !important; width: 20px; }
     .mark-col { text-align: center !important; padding-left: 4px !important; padding-right: 0 !important; width: 20px; }
@@ -152,7 +152,15 @@
     .mark-5 { color: #333; }  /* △ */
     .mark-6 { color: #333; }  /* ▽ */
     .mark-none { color: #e5e7eb; }
-    .my-mark-select { font-size: 1rem; font-weight: 700; border: none; background: transparent; width: 100%; text-align: center; }
+    .my-mark-select {
+      font-size: 1rem; font-weight: 700; border: none; background: transparent;
+      width: 100%; text-align: center; text-align-last: center;
+      padding: 0; margin: 0; cursor: pointer;
+      appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    }
+    /* 選択肢ポップアップは常に濃い色で表示（閉じた状態の色(mark-noneの薄グレー等)を
+       そのまま引き継ぐとポップアップの白背景と同化して見えなくなるため固定色にする） */
+    .my-mark-select option { color: #222; background: #fff; font-weight: 700; }
     .cell-gray { background: #e5e7eb !important; color: #9ca3af !important; }
     .cell-gray .mark, .cell-gray .idx { color: #9ca3af !important; }
 
@@ -249,7 +257,7 @@
       padding: 8px 12px;
       border-radius: 7px;
       font-size: .73rem;
-      font-family: 'BIZ UDGothic', sans-serif;
+      font-family: 'RaceInsightUI', -apple-system, BlinkMacSystemFont, 'SF Pro JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Segoe UI', Meiryo, 'BIZ UDGothic', 'BIZ UD Gothic', sans-serif;
       white-space: pre-line;
       pointer-events: none;
       z-index: 9999;
@@ -306,13 +314,13 @@
         <col style="width:20px">  <!-- 展開印 mark -->
         <col style="width:36px">  <!-- 展開印 idx -->
         <col style="width:20px">  <!-- IDM印 mark -->
-        <col style="width:28px">  <!-- IDM印 idx -->
+        <col style="width:36px">  <!-- IDM印 idx -->
         <col style="width:48px">  <!-- 前3F -->
         <col style="width:48px">  <!-- 後3F -->
         <col style="width:56px">  <!-- 厩舎指数 -->
         <col style="width:56px">  <!-- 厩指穴信頼 -->
         <col style="width:56px">  <!-- 調教SP -->
-        <col style="width:64px">  <!-- 不利指数 -->
+        <col style="width:0">      <!-- 不利指数（非表示） -->
         <col style="width:0">      <!-- 展開指数（非表示） -->
         <col style="width:46px">  <!-- 着順 -->
         <col style="width:52px">  <!-- 単勝 -->
@@ -343,7 +351,7 @@
           <th rowspan="2" class="group-sep col-divider hdr-nowrap">厩指数</th>
           <th rowspan="2" title="厩指穴信頼: 厩舎指数≥0×基準オッズ≥15倍セグメントでの厩舎別信頼度グレード（S~F）&#10;n≥20の厩舎のみ判定">厩指穴<br>信頼</th>
           <th rowspan="2" class="group-sep hdr-nowrap">調教SP</th>
-          <th rowspan="2" class="hdr-nowrap" title="不利巻き返し指数&#10;前走で不利を受けた馬のうち、EX指数/上がり指数/仕上指数/情報印など他指標では高評価されていない馬を検出&#10;A=該当（次走の巻き返し期待）、—=非該当">不利指数</th>
+          <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">不利指数</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">展開指数</th>
           <th rowspan="2" class="group-sep col-divider">着順</th>
           <th rowspan="2">単勝</th>
@@ -384,7 +392,7 @@
 
   function rankMarkHtml(rank) {
     const m = RANK_MARK[rank];
-    if (!m) return '<span class="mark mark-none">—</span>';
+    if (!m) return '<span class="mark mark-none"></span>';
     return `<span class="mark ${m.cls}">${m.sym}</span>`;
   }
 
@@ -791,10 +799,10 @@
       // 枠番
       const waku = parseInt(r.waku_num?.trim() || '0');
       const wakuHtml = waku >= 1 && waku <= 8
-        ? `<span class="waku waku-${waku}">${waku}</span>` : '—';
+        ? `<span class="waku waku-${waku}">${waku}</span>` : '';
 
       // 脚質
-      const kyaku = KYAKU_MAP[r.kyakushitsu?.trim()] || '—';
+      const kyaku = KYAKU_MAP[r.kyakushitsu?.trim()] || '';
 
       // グレー条件（印より先に計算）
       const infoRaw    = parseInt(String(r.joho_index ?? '').trim());
@@ -817,7 +825,7 @@
       // 指数値（別セル用）
       function idxCell(raw, isInt) {
         const v = isInt ? parseInt(String(raw ?? '').trim()) : parseFloat(String(raw ?? '').trim());
-        if (isNaN(v)) return '<span class="idx">—</span>';
+        if (isNaN(v)) return '';
         return `<span class="idx">${isInt ? v : (Number.isInteger(v) ? v : v.toFixed(1))}</span>`;
       }
       function rankCellBg(raw) {
@@ -828,7 +836,7 @@
       }
       function rankNumCell(raw) {
         const v = parseInt(String(raw ?? '').trim());
-        if (isNaN(v) || v === 0) return '<span class="idx">—</span>';
+        if (isNaN(v) || v === 0) return '';
         const color = v === 1 ? '#dc2626' : v <= 3 ? '#15803d' : '#333';
         const style = `style="color:${color};font-weight:${v<=3?v===1?'700':'600':'400'}"`;
 
@@ -858,13 +866,13 @@
       // 厩舎指数
       const stableRaw = String(r.kyusha_index ?? '').trim();
       const stableV   = parseInt(stableRaw);
-      const stableDisp = isNaN(stableV) ? '—'
+      const stableDisp = isNaN(stableV) ? ''
         : `<span class="${stableV >= 10 ? 'stable-good' : stableV < 0 ? 'stable-bad' : ''}">${stableV}</span>`;
 
       // 基準オッズ（CSVに小数点付きで格納済み → parseFloat）
       const oddsV    = parseFloat(String(r.kijun_odds ?? '').trim());
       const oddsRank = parseInt(String(r.kijun_ninki ?? '').trim());
-      let oddsDisp = '—';
+      let oddsDisp = '';
       if (!isNaN(oddsV) && oddsV > 0) {
         const cls = oddsRank === 1 ? 'odds-1' : (oddsRank === 2 || oddsRank === 3) ? 'odds-2-3' : '';
         oddsDisp = `<span class="${cls}">${oddsV.toFixed(1)}</span>`;
@@ -969,7 +977,7 @@
       // 穴馬指数 テキスト生成
       // 100以上は赤背景に白文字、それ以外は背景色に合わせた黒系文字
       function anabaInner(score, tip) {
-        if (!isAnaba || isNaN(score)) return '<span class="anaba-na">—</span>';
+        if (!isAnaba || isNaN(score)) return '';
         const attr = tip ? ` data-tip="${tip}"` : '';
         return `<span style="color:#333"${attr}>${Math.round(score)}</span>`;
       }
@@ -1016,7 +1024,7 @@
       const honmeiCourseTip  = ('本命指数（コース）内訳\n' + honmeiCourseParts.join(' / ')).replace(/"/g, '&quot;');
       // 本命指数セル生成（odds<10のみ色付き表示）
       function honmeiInner(score, tip) {
-        if (!isHonmei || isNaN(score)) return '<span class="anaba-na">—</span>';
+        if (!isHonmei || isNaN(score)) return '';
         const attr = tip ? ` data-tip="${tip}"` : '';
         return `<span style="color:#333"${attr}>${Math.round(score)}</span>`;
       }
@@ -1085,7 +1093,7 @@
         <td><strong>${parseInt(r.uma_num)}</strong></td>
         <td>${myMarkHtml}</td>
         <td>${predictMarkHtml}</td>
-        <td class="left horse-name"${fukushoTip ? ` data-tip="${fukushoTip.replace(/"/g,'&quot;')}"` : ''}>${r.uma_name?.trim() || '—'}${isFukushoSignal ? ' <span style="color:#dc2626;font-size:.75rem;font-weight:700" title="複勝回収率100%超シグナル">🎯</span>' : ''}</td>
+        <td class="left horse-name"${fukushoTip ? ` data-tip="${fukushoTip.replace(/"/g,'&quot;')}"` : ''}>${r.uma_name?.trim() || ''}${isFukushoSignal ? ' <span style="color:#dc2626;font-size:.75rem;font-weight:700" title="複勝回収率100%超シグナル">🎯</span>' : ''}</td>
         <td${blinkerBg}>${blinkerHtml}</td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider"${anabaCourseBg}>${anabaCourseHtml}</td>
@@ -1093,8 +1101,8 @@
         <td class="group-sep"${honmeiCourseBg}>${honmeiCourseHtml}</td>
         <td class="group-sep"><span class="kyaku">${kyaku}</span></td>
         <td class="group-sep"${oddsRank === 1 ? ' style="background:#fbcfe8"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#bbf7d0"' : ''}>${oddsDisp}</td>
-        <td class="group-sep left">${r.kishu_name?.trim() || '—'}</td>
-        <td class="left">${r.trainer_name?.trim() || '—'}</td>
+        <td class="group-sep left">${r.kishu_name?.trim() || ''}</td>
+        <td class="left">${r.trainer_name?.trim() || ''}</td>
         <td class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider mark-col${infoGray ? ' cell-gray' : ''}">${infoMark}</td><td class="idx-col${infoGray ? ' cell-gray' : ''}">${infoIdxCell}</td>
         <td class="group-sep mark-col${goalGray ? ' cell-gray' : ''}">${goalMark}</td><td class="idx-col${goalGray ? ' cell-gray' : ''}">${goalIdxCell}</td>
@@ -1102,35 +1110,34 @@
         <td class="group-sep col-divider rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
         <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
         <td class="group-sep col-divider${stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
-        <td class="kyt-cell${kytGrade ? ' kyt-' + kytGrade.toLowerCase() : ''}"${kytTip ? ` data-tip="${kytTip}"` : ''}>${kytGrade || '—'}</td>
+        <td class="kyt-cell${kytGrade ? ' kyt-' + kytGrade.toLowerCase() : ''}"${kytTip ? ` data-tip="${kytTip}"` : ''}>${kytGrade || ''}</td>
         <td class="group-sep"${(()=>{ const g=spGrades[i]; return g==='A'?' style="background:#fbcfe8"':g==='B'?' style="background:#bbf7d0"':g==='E'?' style="background:#e5e7eb"':''; })()}>${(()=>{
           const g = spGrades[i];
-          if (!g) return '<span class="sp-c">—</span>';
+          if (!g) return '';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
-        <td${furiGrade === 'A' ? ' style="background:#fbcfe8"' : furiGrade === 'B' ? ' style="background:#bbf7d0"' : ''}${furiTip ? ` data-tip="${furiTip}"` : ''}>${furiGrade === 'A' ? '<span class="sp-a">A</span>' : furiGrade === 'B' ? '<span class="sp-b">B</span>' : '—'}</td>
+        <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
-          if (ijou === '1') return '<span class="result-ijou">取消</span>';
-          if (ijou === '2') return '<span class="result-ijou">除外</span>';
-          if (ijou !== '' && ijou !== '0') return `<span class="result-ijou">${ijou}</span>`;
+          const IJOU_LABEL = { '1': '取消', '2': '除外', '3': '中止', '4': '失格', '5': '降着' };
+          if (ijou !== '' && ijou !== '0') return `<span class="result-ijou">${IJOU_LABEL[ijou] || ('異常' + ijou)}</span>`;
           const ord = parseInt(String(r.result_order ?? '').trim());
-          if (isNaN(ord) || ord <= 0) return '—';
+          if (isNaN(ord) || ord <= 0) return '';
           const cls = ord===1?'result-1st':ord===2?'result-2nd':ord===3?'result-3rd':'';
           return `<span class="${cls}">${ord}</span>`;
         })()}</td>
         <td>${(()=>{
           const ord = parseInt(String(r.result_order ?? '').trim());
-          if (ord !== 1) return '—';
+          if (ord !== 1) return '';
           const v = parseInt(String(r.result_win ?? '').trim());
-          return isNaN(v)||v<=0 ? '—' : `<span class="result-pay">${v.toLocaleString()}</span>`;
+          return isNaN(v)||v<=0 ? '' : `<span class="result-pay">${v.toLocaleString()}</span>`;
         })()}</td>
         <td>${(()=>{
           const ord = parseInt(String(r.result_order ?? '').trim());
-          if (isNaN(ord) || ord > 3 || ord <= 0) return '—';
+          if (isNaN(ord) || ord > 3 || ord <= 0) return '';
           const v = parseInt(String(r.result_place ?? '').trim());
-          return isNaN(v)||v<=0 ? '—' : `<span class="result-pay">${v.toLocaleString()}</span>`;
+          return isNaN(v)||v<=0 ? '' : `<span class="result-pay">${v.toLocaleString()}</span>`;
         })()}</td>
       </tr>`;
     }).join('');
