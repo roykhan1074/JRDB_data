@@ -73,6 +73,15 @@
     .kyt-e { background: #e5e7eb; color: #6b7280; }
     .kyt-f { background: #374151; color: #fff; }
 
+
+    /* 先読みなし検証の表（2026-10-04）。幅は colgroup の合計 778px と一致させる */
+    .table-wrap { overflow-x: auto; }
+    .wf-table { table-layout: fixed; width: 778px; border-collapse: collapse; font-size: .82rem; }
+    .wf-table th { text-align: center; font-size: .72rem; color: #888; padding: 5px 4px; border-bottom: 1px solid #eee; overflow: hidden; line-height: 1.3; }
+    .wf-table th.hdr-nowrap { white-space: nowrap; }
+    .wf-table td { text-align: center; padding: 6px 4px; border-bottom: 1px solid #f5f5f5; white-space: nowrap; overflow: hidden; }
+    .wf-table td.label-cell { text-align: left; font-weight: 700; }
+    .wf-table tr:last-child td { border-bottom: none; }
     .msg { text-align: center; padding: 40px; color: #888; font-size: .9rem; }
     .err { color: #dc2626; }
     .hidden { display: none; }
@@ -89,10 +98,23 @@
   <div class="page-sub">指数・グレード帯別の回収率を横断チェック</div>
   <div class="page-lead">気になる指数をタップすると、該当セクションにジャンプします</div>
   <div class="chip-nav">
+    <a href="#panel-favorite">1番人気信頼度</a>
+    <a href="#panel-ex-wf">EX指数帯</a>
+    <a href="#panel-honmei-wf">本命指数帯</a>
+    <a href="#panel-sc">注目馬複合シグナル(sc)</a>
+  </div>
+  <!-- 2026-09-27、ユーザー指示により非表示。EX指数・本命指数・ブリンカー指数・厩指穴信頼は
+       いずれもT_XXX_FACTOR_AGG系のファクター集計を「全期間プール→過去レースにも遡って適用」する設計で、
+       ウォークフォワード検証で表示値が先読みバイアスにより過大（EX指数course_score100+帯: 表示194.8%→実測76.4%）
+       と確認済み（EX指数・本命指数）、または未検証だが同一の構造的リスクを抱える（ブリンカー指数、
+       project_blinker_recovery_analysis.mdに学習/評価分割バックテスト未実施と明記）、
+       または既にホールドアウト検証で失敗が確認済み（厩指穴信頼）。削除ではなく非表示: コードは残す。
+       2026-10-05、ブリンカー指数はユーザー指示で廃止し、パネル・リンク・集計コードを削除した。
+       2026-10-05、穴妙味指数もユーザー判断で廃止。表示値は全期間集計（先読みあり）で、先読みを除くと
+       A 単勝82.5% / B 73.1%（同オッズ帯平均77.4%並み）のため、パネルとリンクを非表示にした（コードは残す）。 -->
+  <div hidden>
     <a href="#panel-ex">EX指数帯</a>
     <a href="#panel-honmei">本命指数帯</a>
-    <a href="#panel-blinker">ブリンカー指数</a>
-    <a href="#panel-sc">注目馬複合シグナル(sc)</a>
     <a href="#panel-kyusha">厩指穴信頼</a>
   </div>
 
@@ -106,7 +128,8 @@
 
   <div id="msg" class="msg">読み込み中...</div>
   <div id="result" class="hidden">
-    <div class="panel" id="panel-ex">
+    <!-- 2026-09-27非表示（理由は上部chip-nav付近のコメント参照）。コードは残す。 -->
+    <div class="panel" id="panel-ex" hidden>
       <h3>EX指数帯別成績</h3>
       <div class="desc">出走馬中EX指数（anaba_course_score）の帯域別。基準オッズ≧10倍の馬のみ対象（EX指数の設計上、穴馬向け指数のため）</div>
       <table class="mark-table">
@@ -115,7 +138,7 @@
       </table>
     </div>
 
-    <div class="panel" id="panel-honmei">
+    <div class="panel" id="panel-honmei" hidden>
       <h3>本命指数帯別成績</h3>
       <div class="desc">本命指数（honmei_course_score）の帯域別。基準オッズ＜10倍の馬のみ対象</div>
       <table class="mark-table">
@@ -124,25 +147,85 @@
       </table>
     </div>
 
-    <div class="panel" id="panel-blinker">
-      <h3>ブリンカー指数グレード別成績</h3>
-      <div class="desc">初装着・再装着馬のコース適性・クラス・脚質・性別・ローテーション・枠番・IDM順位・テン指数順位・上がり指数順位の回収率偏差から算出。バックテストで中間解像度が低いことが判明しているためA/B/Cの3段階グレードのみ集計（詳細: document/指数/ブリンカー指数_仕様書.md）</div>
+    <!-- 2026-10-04、ユーザー指示により非表示。出馬表の列#8を期待値指数から sc に差し替え、
+         download.html の期待値指数の更新ボタンも非表示にしたため（T_EV_SCORE が更新されず表が古いままになる）。
+         削除ではなく非表示: コードは残す。 -->
+    <div class="panel" id="panel-ev" hidden>
+      <h3>期待値指数帯別成績</h3>
+      <div class="desc">T_EV_SCORE.ev_index（オッズ帯別isotonic較正済みモデルによる(較正後予測複勝確率/市場複勝確率-1)×100）の帯域別。entries.html「期待値」列のevScoreBgと同じ閾値。オッズ帯別に較正済み・センチネル値除外済みのため先読みバイアスの懸念なし</div>
       <table class="mark-table">
-        <thead><tr><th>区分</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
-        <tbody id="tbody-blinker"></tbody>
+        <thead><tr><th>指数帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-ev"></tbody>
       </table>
+    </div>
+
+    <div class="panel" id="panel-favorite">
+      <h3>1番人気信頼度グレード別成績</h3>
+      <div class="desc">entries.htmlの本命信頼度バッジと同じ計算式（IDM優位性・情報指数一致・展開・調教矢印・追切/仕上指数・テン/上がり指数順位からS〜Eを判定）。全項目がレース前公表値のみで構成され過去集計テーブルに依存しないため先読みバイアスの懸念なし。低グレード(D/E)は「市場評価は高いがデータ的な裏付けが薄い偽本命」シグナル</div>
+      <table class="mark-table">
+        <thead><tr><th>グレード</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-favorite"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="panel-myomi" hidden>
+      <h3>穴妙味指数グレード別成績</h3>
+      <div class="desc">entries.html列#25「穴妙味」と同じ定義。EX指数(コース)×IDM印なし×基準オッズ15-30倍のセグメント内で、course_score≧100→A、50-100→B。25-50帯は年別に不安定なため対象外（詳細: document/指数/【廃】穴妙味指数_仕様書.md）</div>
+      <table class="mark-table">
+        <thead><tr><th>グレード</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
+        <tbody id="tbody-myomi"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="panel-ex-wf">
+      <h3>EX指数帯別成績（先読みなし検証）</h3>
+      <div class="desc">基準オッズ10倍以上の馬が対象（EX指数は穴馬向けの指数）。EX指数は2026-10-04の新方式（詳細: document/指数/EX指数_仕様書.md）。先読みなしの検証値（2022〜2026年、芝ダ、新馬戦除外）。EX指数・本命指数は毎年「直前の年までの全データ」で集計し直して採点した値を使用（本番の値で過去を振り返ると未来の結果が混ざり成績が良く見えるため）。「同オッズ複勝平均」は同じ年・同じ基準オッズ帯の全馬の複勝回収率、「平均との差」はそれとの差（pt）。検証済みの固定値のため「再集計」ボタンの対象外（2026-10-04 集計）。</div>
+      <div class="table-wrap"><table class="wf-table"><colgroup><col style="width:72px"><col style="width:72px"><col style="width:56px"><col style="width:60px"><col style="width:68px"><col style="width:68px"><col style="width:72px"><col style="width:60px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"></colgroup><thead><tr><th rowspan="2" class="hdr-nowrap">指数帯</th><th rowspan="2" class="hdr-nowrap">件数</th><th rowspan="2" class="hdr-nowrap">勝率</th><th rowspan="2" class="hdr-nowrap">複勝率</th><th rowspan="2">単勝<br>回収率</th><th rowspan="2">複勝<br>回収率</th><th rowspan="2">同オッズ<br>複勝平均</th><th rowspan="2">平均<br>との差</th><th colspan="5" class="hdr-nowrap">年別の差（複勝）</th></tr><tr><th class="hdr-nowrap">2022</th><th class="hdr-nowrap">2023</th><th class="hdr-nowrap">2024</th><th class="hdr-nowrap">2025</th><th class="hdr-nowrap">2026</th></tr></thead><tbody>
+<tr><td class="label-cell">0未満</td><td>72,040</td><td>1.6%</td><td>7.4%</td><td><span class="rr-low">60.8%</span></td><td><span class="rr-low">60.6%</span></td><td>66.4%</td><td><b>-5.8</b></td><td>-7.3</td><td>-4.4</td><td>-6.3</td><td>-3.9</td><td>-7.2</td></tr>
+<tr><td class="label-cell">0〜15</td><td>14,600</td><td>2.6%</td><td>11.8%</td><td><span class="rr-low">73.3%</span></td><td><span class="rr-low">75.7%</span></td><td>69.8%</td><td><b>+5.9</b></td><td>+9.8</td><td>+8.4</td><td>+4.8</td><td>+3.4</td><td>+3.2</td></tr>
+<tr><td class="label-cell">15〜50</td><td>23,627</td><td>3.2%</td><td>14.0%</td><td><span class="rr-low">77.5%</span></td><td><span class="rr-low">76.9%</span></td><td>71.0%</td><td><b>+5.9</b></td><td>+5.8</td><td>+6.7</td><td>+5.5</td><td>+4.8</td><td>+7.1</td></tr>
+<tr><td class="label-cell">50〜100</td><td>14,353</td><td>3.7%</td><td>16.2%</td><td><span class="rr-low">74.6%</span></td><td><span class="rr-low">79.4%</span></td><td>72.1%</td><td><b>+7.3</b></td><td>+10.2</td><td>+0.8</td><td>+10.8</td><td>+4.2</td><td>+12.0</td></tr>
+<tr><td class="label-cell">100以上</td><td>8,045</td><td>4.7%</td><td>17.9%</td><td><span class="rr-80up">88.4%</span></td><td><span class="rr-80up">82.9%</span></td><td>72.4%</td><td><b>+10.5</b></td><td>+17.3</td><td>+5.7</td><td>+12.6</td><td>+4.1</td><td>+14.3</td></tr>
+</tbody></table></div>
+      <div class="desc" style="margin-top:8px">点数が高いほど同じオッズ帯の馬より複勝回収率が高い。単勝は払戻上位を除くと平均を下回るため、判断材料は複勝。</div>
+    </div>
+
+    <div class="panel" id="panel-honmei-wf">
+      <h3>本命指数帯別成績（先読みなし検証）</h3>
+      <div class="desc">基準オッズ10倍未満の馬が対象。本命指数は2026-10-04の新方式（詳細: document/指数/本命指数_仕様書.md）。先読みなしの検証値（2022〜2026年、芝ダ、新馬戦除外）。EX指数・本命指数は毎年「直前の年までの全データ」で集計し直して採点した値を使用（本番の値で過去を振り返ると未来の結果が混ざり成績が良く見えるため）。「同オッズ複勝平均」は同じ年・同じ基準オッズ帯の全馬の複勝回収率、「平均との差」はそれとの差（pt）。検証済みの固定値のため「再集計」ボタンの対象外（2026-10-04 集計）。</div>
+      <div class="table-wrap"><table class="wf-table"><colgroup><col style="width:72px"><col style="width:72px"><col style="width:56px"><col style="width:60px"><col style="width:68px"><col style="width:68px"><col style="width:72px"><col style="width:60px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"></colgroup><thead><tr><th rowspan="2" class="hdr-nowrap">指数帯</th><th rowspan="2" class="hdr-nowrap">件数</th><th rowspan="2" class="hdr-nowrap">勝率</th><th rowspan="2" class="hdr-nowrap">複勝率</th><th rowspan="2">単勝<br>回収率</th><th rowspan="2">複勝<br>回収率</th><th rowspan="2">同オッズ<br>複勝平均</th><th rowspan="2">平均<br>との差</th><th colspan="5" class="hdr-nowrap">年別の差（複勝）</th></tr><tr><th class="hdr-nowrap">2022</th><th class="hdr-nowrap">2023</th><th class="hdr-nowrap">2024</th><th class="hdr-nowrap">2025</th><th class="hdr-nowrap">2026</th></tr></thead><tbody>
+<tr><td class="label-cell">0未満</td><td>31,818</td><td>13.4%</td><td>38.7%</td><td><span class="rr-low">74.2%</span></td><td><span class="rr-low">76.7%</span></td><td>79.4%</td><td><b>-2.7</b></td><td>-1.6</td><td>-2.2</td><td>-4.4</td><td>-2.6</td><td>-2.6</td></tr>
+<tr><td class="label-cell">0〜10</td><td>9,016</td><td>17.6%</td><td>47.3%</td><td><span class="rr-low">76.7%</span></td><td><span class="rr-80up">82.6%</span></td><td>80.2%</td><td><b>+2.4</b></td><td>+1.4</td><td>+3.5</td><td>+3.5</td><td>+2.5</td><td>+1.0</td></tr>
+<tr><td class="label-cell">10〜30</td><td>11,565</td><td>20.5%</td><td>50.6%</td><td><span class="rr-80up">80.6%</span></td><td><span class="rr-80up">82.5%</span></td><td>80.7%</td><td><b>+1.8</b></td><td>+0.9</td><td>+1.1</td><td>+2.7</td><td>+3.1</td><td>+0.8</td></tr>
+<tr><td class="label-cell">30〜50</td><td>5,318</td><td>24.0%</td><td>56.3%</td><td><span class="rr-80up">81.8%</span></td><td><span class="rr-80up">85.5%</span></td><td>81.5%</td><td><b>+4.0</b></td><td>+3.2</td><td>+3.0</td><td>+8.4</td><td>+1.6</td><td>+4.5</td></tr>
+<tr><td class="label-cell">50以上</td><td>4,228</td><td>31.9%</td><td>63.9%</td><td><span class="rr-80up">86.4%</span></td><td><span class="rr-80up">87.8%</span></td><td>82.8%</td><td><b>+5.1</b></td><td>+1.7</td><td>+2.4</td><td>+12.8</td><td>+3.6</td><td>+9.4</td></tr>
+</tbody></table></div>
+      <div class="desc" style="margin-top:8px">50以上の帯は単勝・複勝とも同じオッズ帯の平均を上回る。</div>
     </div>
 
     <div class="panel" id="panel-sc">
-      <h3>注目馬複合シグナル(sc)帯別成績</h3>
-      <div class="desc">entries.htmlの推奨買い目が使う複合シグナルスコア(sc)の帯域別・単勝回収率基準。⚠ 下表は他の指数帯と同様、combo・kyushaの現在値を過去全期間に遡って適用した集計のため、先読みバイアスにより回収率が過大表示される（特にsc≥6帯）。実際にウォッチリストで採用しているsc≥6の閾値は、日単位walk-forward検証（先読み排除）で学習期間・2024・2025・2026年の4区間すべて単勝回収率100〜114%程度であることを確認済み。詳細: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md</div>
-      <table class="mark-table">
-        <thead><tr><th>スコア帯</th><th>件数</th><th>勝率</th><th>連対率</th><th>複勝率</th><th>単勝回収率</th><th>複勝回収率</th></tr></thead>
-        <tbody id="tbody-sc"></tbody>
-      </table>
+      <h3>注目馬複合シグナル（sc）値別成績（先読みなし検証）</h3>
+      <div class="desc">sc は出馬表の推奨買い目と同じ計算（2026-10-04 追加の「指数の抜け・人気とのずれ」込み）。騎手×厩舎・厩舎成績はその日より前の結果だけで計算。先読みなしの検証値（2022〜2026年、芝ダ、新馬戦除外）。EX指数・本命指数は毎年「直前の年までの全データ」で集計し直して採点した値を使用（本番の値で過去を振り返ると未来の結果が混ざり成績が良く見えるため）。「同オッズ複勝平均」は同じ年・同じ基準オッズ帯の全馬の複勝回収率、「平均との差」はそれとの差（pt）。検証済みの固定値のため「再集計」ボタンの対象外（2026-10-04 集計）。</div>
+      <div class="table-wrap"><table class="wf-table"><colgroup><col style="width:72px"><col style="width:72px"><col style="width:56px"><col style="width:60px"><col style="width:68px"><col style="width:68px"><col style="width:72px"><col style="width:60px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"></colgroup><thead><tr><th rowspan="2" class="hdr-nowrap">sc</th><th rowspan="2" class="hdr-nowrap">件数</th><th rowspan="2" class="hdr-nowrap">勝率</th><th rowspan="2" class="hdr-nowrap">複勝率</th><th rowspan="2">単勝<br>回収率</th><th rowspan="2">複勝<br>回収率</th><th rowspan="2">同オッズ<br>複勝平均</th><th rowspan="2">平均<br>との差</th><th colspan="5" class="hdr-nowrap">年別の差（複勝）</th></tr><tr><th class="hdr-nowrap">2022</th><th class="hdr-nowrap">2023</th><th class="hdr-nowrap">2024</th><th class="hdr-nowrap">2025</th><th class="hdr-nowrap">2026</th></tr></thead><tbody>
+<tr><td class="label-cell">−1以下</td><td>2,800</td><td>0.6%</td><td>2.5%</td><td><span class="rr-low">47.3%</span></td><td><span class="rr-low">35.2%</span></td><td>61.5%</td><td><b>-26.3</b></td><td>-23.8</td><td>-13.2</td><td>-41.7</td><td>-33.1</td><td>-21.4</td></tr>
+<tr><td class="label-cell">0</td><td>62,957</td><td>2.7%</td><td>10.6%</td><td><span class="rr-low">61.2%</span></td><td><span class="rr-low">61.3%</span></td><td>68.9%</td><td><b>-7.6</b></td><td>-8.3</td><td>-6.1</td><td>-8.8</td><td>-4.8</td><td>-11.0</td></tr>
+<tr><td class="label-cell">1</td><td>21,131</td><td>7.7%</td><td>26.0%</td><td><span class="rr-low">75.6%</span></td><td><span class="rr-low">76.7%</span></td><td>75.6%</td><td><b>+1.1</b></td><td>+2.8</td><td>+2.5</td><td>+1.1</td><td>-0.1</td><td>-0.7</td></tr>
+<tr><td class="label-cell">2</td><td>35,283</td><td>6.3%</td><td>20.3%</td><td><span class="rr-low">74.2%</span></td><td><span class="rr-low">74.9%</span></td><td>70.6%</td><td><b>+4.3</b></td><td>+4.9</td><td>+3.9</td><td>+1.1</td><td>+4.0</td><td>+8.1</td></tr>
+<tr><td class="label-cell">3</td><td>24,138</td><td>9.2%</td><td>27.5%</td><td><span class="rr-low">78.4%</span></td><td><span class="rr-low">78.4%</span></td><td>74.6%</td><td><b>+3.9</b></td><td>+2.2</td><td>+4.9</td><td>+6.7</td><td>+3.9</td><td>+1.2</td></tr>
+<tr><td class="label-cell">4</td><td>17,734</td><td>10.5%</td><td>29.8%</td><td><span class="rr-low">71.2%</span></td><td><span class="rr-low">79.2%</span></td><td>75.3%</td><td><b>+3.9</b></td><td>+0.7</td><td>-0.6</td><td>+8.5</td><td>+1.6</td><td>+11.2</td></tr>
+<tr><td class="label-cell">5</td><td>12,621</td><td>11.9%</td><td>31.4%</td><td><span class="rr-low">72.8%</span></td><td><span class="rr-low">78.1%</span></td><td>75.4%</td><td><b>+2.7</b></td><td>+1.7</td><td>+1.0</td><td>+5.1</td><td>+0.5</td><td>+6.1</td></tr>
+<tr><td class="label-cell">6</td><td>7,945</td><td>14.0%</td><td>36.0%</td><td><span class="rr-80up">85.7%</span></td><td><span class="rr-80up">84.2%</span></td><td>76.3%</td><td><b>+7.8</b></td><td>+13.4</td><td>+3.3</td><td>+12.6</td><td>+7.9</td><td>-0.1</td></tr>
+<tr><td class="label-cell">7</td><td>4,767</td><td>17.3%</td><td>39.8%</td><td><span class="rr-80up">88.7%</span></td><td><span class="rr-80up">88.4%</span></td><td>77.0%</td><td><b>+11.4</b></td><td>+12.0</td><td>+10.8</td><td>+8.8</td><td>+8.0</td><td>+19.4</td></tr>
+<tr><td class="label-cell">8</td><td>2,669</td><td>17.8%</td><td>41.2%</td><td><span class="rr-low">77.6%</span></td><td><span class="rr-80up">88.7%</span></td><td>77.4%</td><td><b>+11.3</b></td><td>+14.1</td><td>-2.7</td><td>+26.6</td><td>-1.4</td><td>+25.5</td></tr>
+<tr><td class="label-cell">9</td><td>1,390</td><td>19.1%</td><td>43.3%</td><td><span class="rr-100up">109.4%</span></td><td><span class="rr-90up">93.0%</span></td><td>77.6%</td><td><b>+15.4</b></td><td>+26.1</td><td>+11.4</td><td>+5.5</td><td>+17.4</td><td>+11.0</td></tr>
+<tr><td class="label-cell">10</td><td>677</td><td>20.2%</td><td>44.2%</td><td><span class="rr-80up">85.6%</span></td><td><span class="rr-90up">91.4%</span></td><td>78.0%</td><td><b>+13.4</b></td><td>+9.5</td><td>+21.5</td><td>+19.9</td><td>+2.5</td><td>+16.9</td></tr>
+<tr><td class="label-cell">11</td><td>316</td><td>24.4%</td><td>50.3%</td><td><span class="rr-90up">99.7%</span></td><td><span class="rr-90up">92.2%</span></td><td>79.0%</td><td><b>+13.2</b></td><td>+24.4</td><td>+10.6</td><td>+11.4</td><td>-0.5</td><td>+20.3</td></tr>
+<tr><td class="label-cell">12以上</td><td>182</td><td>22.5%</td><td>43.4%</td><td><span class="rr-100up">103.1%</span></td><td><span class="rr-80up">84.5%</span></td><td>78.7%</td><td><b>+5.7</b></td><td>-11.7</td><td>-3.3</td><td>+27.6</td><td>+26.8</td><td>-12.8</td></tr>
+</tbody></table></div>
+      <div class="desc" style="margin-top:8px">sc 6以上で複勝の同オッズ平均をはっきり上回る。sc 10以上は頭数が少なく年ごとの振れが大きいので参考程度。旧表示の「sc≥6は4期間すべて単勝100%超」は、EX指数・本命指数に先読みが混ざった検証によるもので誤り（詳細: document/指数/sc_注目馬複合シグナル_仕様書.md）。</div>
     </div>
 
-    <div class="panel" id="panel-kyusha">
+    <div class="panel" id="panel-kyusha" hidden>
       <h3>厩指穴信頼グレード別成績</h3>
       <div class="desc">厩舎指数≧0×基準オッズ≧15倍セグメントでの厩舎別信頼度グレード（S〜F、n≧20の厩舎のみ）。出馬表の「厩指穴信頼」列と同じグレード定義</div>
       <table class="mark-table">
@@ -199,8 +282,9 @@ async function load() {
 function render(data) {
   renderRows('tbody-ex', data.exIndex, r => r.band_label);
   renderRows('tbody-honmei', data.honmeiIndex, r => r.band_label);
-  renderRows('tbody-blinker', data.blinkerIndex || [], r => r.band_label);
-  renderRows('tbody-sc', data.scIndex || [], r => r.band_label);
+  renderRows('tbody-ev', data.evIndex || [], r => r.band_label);
+  renderRows('tbody-favorite', data.favoriteReliability || [], r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);
+  renderRows('tbody-myomi', data.myomiGrade || [], r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);
   renderRows('tbody-kyusha', data.kyushaTrust, r => `<span class="kyt-badge kyt-${r.band_label.toLowerCase()}">${r.band_label}</span>`);
 
   const updated = new Date(data.updatedAt);

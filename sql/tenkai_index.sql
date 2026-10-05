@@ -197,6 +197,10 @@ ON DUPLICATE KEY UPDATE
 -- コース別集計（course_code/tds_code/dist_band を指定）を両方投入する
 -- ============================================================
 
+-- 2026-09-27追記: 過去に HAVING ガードなしで投入された薄いサンプルの行が
+-- ON DUPLICATE KEY UPDATE では削除されずに残り続けるため、再集計前に必ず空にする。
+TRUNCATE TABLE T_TENKAI_FACTOR_AGG;
+
 -- ── ベースライン（全体）────────────────────────────────────────
 INSERT INTO T_TENKAI_FACTOR_AGG
   (factor_type, factor_value, course_code, tds_code, dist_band,
@@ -257,6 +261,7 @@ GROUP BY course_code, tds_code,
     WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
     ELSE '2401~'
   END
+HAVING COUNT(*) >= 50
 ON DUPLICATE KEY UPDATE
   total_count=VALUES(total_count), win_count=VALUES(win_count),
   place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
@@ -288,7 +293,7 @@ FROM T_TENKAI_RACE_LOG
 WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
   AND TRIM(kyakushitsu) IN ('1','2','3','4')
   AND pace_scenario IS NOT NULL
-GROUP BY pace_scenario, TRIM(kyakushitsu)
+GROUP BY CONCAT(pace_scenario, '|', TRIM(kyakushitsu))
 HAVING COUNT(*) >= 30
 ON DUPLICATE KEY UPDATE
   total_count=VALUES(total_count), win_count=VALUES(win_count),
@@ -327,7 +332,7 @@ WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
   AND TRIM(kyakushitsu) IN ('1','2','3','4')
   AND pace_scenario IS NOT NULL
   AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, pace_scenario, TRIM(kyakushitsu)
+GROUP BY course_code, tds_code, dist_band, CONCAT(pace_scenario, '|', TRIM(kyakushitsu))
 HAVING COUNT(*) >= 20
 ON DUPLICATE KEY UPDATE
   total_count=VALUES(total_count), win_count=VALUES(win_count),

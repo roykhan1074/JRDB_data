@@ -146,7 +146,7 @@
     /* 印 */
     .mark { font-size: 1rem; font-weight: 700; }
     .mark-1 { color: #dc2626; }  /* ◎赤 */
-    .mark-2 { color: #16a34a; }  /* ○緑 */
+    .mark-2 { color: #16a34a; font-size: 1.4rem; line-height: 1; }  /* ○緑（○の字形は同じfont-sizeでも◎等より小さく見えるため拡大。remで他の印と同じ基準に統一） */
     .mark-3 { color: #16a34a; }  /* ▲緑 */
     .mark-4 { color: #333; }  /* 注 */
     .mark-5 { color: #333; }  /* △ */
@@ -161,6 +161,9 @@
     /* 選択肢ポップアップは常に濃い色で表示（閉じた状態の色(mark-noneの薄グレー等)を
        そのまま引き継ぐとポップアップの白背景と同化して見えなくなるため固定色にする） */
     .my-mark-select option { color: #222; background: #fff; font-weight: 700; }
+    /* .my-mark-selectのfont-size:1remが.mark-2の1.4emより後に定義されており、同じ詳細度のため
+       ソース順で上書きしていた（○が拡大されない不具合）。組み合わせセレクタで明示的に上書きする。 */
+    .my-mark-select.mark-2 { font-size: 1.4rem; }
     .cell-gray { background: #e5e7eb !important; color: #9ca3af !important; }
     .cell-gray .mark, .cell-gray .idx { color: #9ca3af !important; }
 
@@ -239,8 +242,8 @@
       box-shadow: inset 3px 0 0 #16a34a;
     }
 
-    /* 複勝回収率100%超シグナル行ハイライト: sc≥3 × 基準オッズ15~30倍
-       出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md
+    /* 複勝妙味シグナル行ハイライト: 複勝sc≥3 × 基準オッズ15~30倍
+       2026-10-04: 旧称「複勝回収率100%超シグナル」。先読みなしの検証で100%超は成り立たなかったため改称し、EX指数のしきい値を新方式の指数に合わせて 15/50→35/125 に変更（本命指数 10/30 は据え置き）。根拠: python/research/fukusho100_threshold_wf.py、document/指数/複勝妙味シグナル_仕様書.md
        walk-forward検証済み: 複勝回収率100.7%・的中率20.0%（n=3,523、学習/評価の複数期間で再現） */
     tbody tr.fukusho-signal td:first-child {
       box-shadow: inset 3px 0 0 #dc2626;
@@ -301,9 +304,9 @@
         <col style="width:160px"> <!-- 馬名 -->
         <col style="width:36px">  <!-- B（初B/再B） -->
         <col style="width:0">      <!-- EX指数全体（非表示） -->
-        <col style="width:56px">  <!-- EX指数コース -->
+        <col style="width:56px">  <!-- 期待値指数（2026-09-26、EX指数コースの表示位置に移動） -->
         <col style="width:0">      <!-- 本命指数全体（非表示） -->
-        <col style="width:48px">  <!-- 本命指数コース -->
+        <col style="width:0">      <!-- 本命指数コース（非表示。2026-09-27ユーザー指示） -->
         <col style="width:48px">  <!-- 脚質 -->
         <col style="width:60px">  <!-- オッズ -->
         <col style="width:76px">  <!-- 騎手 -->
@@ -318,8 +321,8 @@
         <col style="width:48px">  <!-- 前3F -->
         <col style="width:48px">  <!-- 後3F -->
         <col style="width:56px">  <!-- 厩舎指数 -->
-        <col style="width:56px">  <!-- 厩指穴信頼 -->
         <col style="width:56px">  <!-- 調教SP -->
+        <col style="width:0">      <!-- 期待値指数（非表示。EX指数コースの位置(col#8)に移動済み） -->
         <col style="width:0">      <!-- 不利指数（非表示） -->
         <col style="width:0">      <!-- 展開指数（非表示） -->
         <col style="width:46px">  <!-- 着順 -->
@@ -335,9 +338,9 @@
           <th rowspan="2" class="left">馬名</th>
           <th rowspan="2" class="hdr-nowrap">B</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">EX指数全体</th>
-          <th rowspan="2" class="group-sep col-divider hdr-nowrap" title="EX指数（コース別）&#10;kijun_odds≥10倍の馬のみ表示&#10;場×芝ダ×距離帯の補正あり">EX指数</th>
+          <th rowspan="2" class="group-sep col-divider hdr-nowrap" title="sc（注目馬複合シグナル）: 推奨買い目と同じ点数。指数・調教・展開予測・指数の抜け・人気とのずれ等のシグナルの合計&#10;色: 7以上=ピンク / 6=黄色 / 1〜5=無色 / 0以下=グレー&#10;先読みなしの検証（2022〜2026）で、複勝回収率が同じ基準オッズ帯の馬の平均より sc6:+7.8 / sc7:+11.4 / sc9:+15.4pt（sc0:−7.6pt）&#10;セルにマウスを乗せるとシグナルの内訳を表示。詳細は 指数帯別回収率 ページの sc 表">sc</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命全体</th>
-          <th rowspan="2" class="group-sep" title="本命指数（コース別）&#10;kijun_odds＜10倍の馬のみ表示&#10;場×芝ダ×距離帯の補正あり">本命</th>
+          <th rowspan="2" class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命指数コース</th>
           <th rowspan="2" class="group-sep hdr-nowrap">脚質</th>
           <th rowspan="2" class="group-sep hdr-nowrap">オッズ</th>
           <th rowspan="2" class="group-sep left">騎手</th>
@@ -349,8 +352,8 @@
           <th rowspan="2" class="group-sep col-divider rank-col">前3F</th>
           <th rowspan="2" class="rank-col">後3F</th>
           <th rowspan="2" class="group-sep col-divider hdr-nowrap">厩指数</th>
-          <th rowspan="2" title="厩指穴信頼: 厩舎指数≥0×基準オッズ≥15倍セグメントでの厩舎別信頼度グレード（S~F）&#10;n≥20の厩舎のみ判定">厩指穴<br>信頼</th>
           <th rowspan="2" class="group-sep hdr-nowrap">調教SP</th>
+          <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">期待値（非表示・col8に移動）</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">不利指数</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">展開指数</th>
           <th rowspan="2" class="group-sep col-divider">着順</th>
@@ -421,6 +424,24 @@
     } catch (e) {
       alert('予想印の保存に失敗しました: ' + e.message);
     }
+  }
+
+  // ──────────────────────────────────────────────────
+  // 穴妙味指数 計算（EX指数コース × IDM印なし × オッズ15-30倍のセグメント限定グレード）
+  //
+  // 2026-09-27検証: このセグメント内でcourse_scoreをさらに細分化したところ、
+  // 25-50帯は年によって単勝59〜124%・複勝も常に90%未満と不安定でエッジと呼べなかった
+  // （debunkした旧「情報指数-1」と同じ「一部の強い区分が弱い区分を引き上げていただけ」のパターン）。
+  // 50-100帯（単勝93.5〜168.3%、6/7年100%超）・100+帯（単勝122〜254%、7年連続100%超、
+  // 複勝も6/7年100%超）の2段階のみを、データに基づく妥当なグレードとして採用する。
+  // 母集団外（オッズ範囲外・IDM印あり・course_score<50）はグレードなし（null）。
+  // ──────────────────────────────────────────────────
+  function anabaMyomiGrade(anaba, idmMark, odds) {
+    if (isNaN(anaba) || idmMark !== null) return null;
+    if (isNaN(odds) || odds < 15 || odds > 30) return null;
+    if (anaba >= 100) return 'A';
+    if (anaba >= 50)  return 'B';
+    return null;
   }
 
   // ──────────────────────────────────────────────────
@@ -771,7 +792,7 @@
     if (!rows || !rows.length) {
       document.getElementById('table-wrap').style.display = '';
       document.getElementById('tbody').innerHTML =
-        '<tr><td colspan="29" style="text-align:center;padding:32px;color:#aaa">データがありません</td></tr>';
+        '<tr><td colspan="32" style="text-align:center;padding:32px;color:#aaa">データがありません</td></tr>';
       return;
     }
 
@@ -795,6 +816,18 @@
 
     const spGrades = calcChokyoSP(rows);
 
+    // 列#8: 注目馬複合シグナル sc（2026-10-04、期待値指数の表示から差し替え。ユーザー指示: 期待値指数は sc と重なる部分が多いため）
+    // sc は推奨買い目と同じ evaluateRaceSignals() の値。色分けは先読みなしの検証（2022〜2026、factor-recovery.html の sc 表）に基づく:
+    //   7以上=ピンク（複勝の同オッズ平均との差 +11以上）/ 6=黄色（+7.8）/ 1〜5=無色（+1〜+4）/ 0以下=グレー（−7.6以下）
+    const scByUma = new Map(evaluateRaceSignals(rows).evaluated.map(h => [h.umaNum, h]));
+    function scBg(sc) {
+      if (sc === undefined || sc === null || isNaN(sc)) return '';
+      if (sc >= 7) return ' style="background:#fbcfe8"';
+      if (sc >= 6) return ' style="background:#fef9c3"';
+      if (sc >= 1) return '';
+      return ' style="background:#e5e7eb"';
+    }
+
     const html = rows.map((r, i) => {
       // 枠番
       const waku = parseInt(r.waku_num?.trim() || '0');
@@ -813,14 +846,12 @@
       const idmMark   = rankMarkHtml(idmRanks[i]);
       const goalMark  = rankMarkHtml(goalRanks[i]);
 
-      // ブリンカー（1:初装着 2:再装着。グレードAは背景ピンク）
+      // ブリンカー（1:初装着 2:再装着）。JRDBの装着情報をそのまま表示する
+      // （ブリンカー指数は2026-10-05廃止。document/指数/【廃】ブリンカー指数_仕様書.md）
       const blinkerType  = String(r.blinker ?? '').trim();
-      const blinkerGrade = String(r.blinker_grade ?? '').trim();
       const blinkerHtml = blinkerType === '1' ? '<span style="font-weight:700;color:#1d4ed8">初B</span>'
                         : blinkerType === '2' ? '<span style="font-weight:700;color:#1d4ed8">再B</span>'
                         : '';
-      const blinkerBg = (blinkerType === '1' || blinkerType === '2') && blinkerGrade === 'A'
-        ? ' style="background:#fbcfe8"' : '';
 
       // 指数値（別セル用）
       function idxCell(raw, isInt) {
@@ -842,6 +873,34 @@
 
         return `<span ${style}>${v}</span>`;
       }
+      // 期待値指数(ev_index): オッズ帯別isotonic較正済みモデルによる(較正後予測/市場-1)×100。
+      // ウォークフォワード検証(2020-2023学習/2024-2026検証)で帯別複勝回収率が単調増加することを確認済み
+      // （edge<-50:56% / -50~-20:76% / -20~-5:81% / -5~20:82~86%）。
+      // 2026-09-27、表示は ev_index に +25 したものを使う。
+      // 理由: ev_index の「0」は数式上「モデルと市場が一致する点」に過ぎず、この母集団の
+      // 加重平均複勝回収率(実測71.2%、感覚的には75%前後)とは無関係。そのため実際には
+      // 平均より回収率が高い-20~-5帯(81.3%)がマイナス表示になり「回収率と符号が逆」に見える
+      // 混乱を招いていた。+25シフトすることで「0 ≈ 平均的な回収率(75%前後)」に再定義し、
+      // 平均より良い/悪いが符号の正負と一致するようにする（色分けの閾値・実測値との対応は不変、
+      // 表示する数字だけを分かりやすくシフトしている）。
+      // 2026-09-27、色分けをCLAUDE.mdの正典パターン(最上位=薄赤/上位=ピンク/中位=黄色/
+      // 低スコア=白(無色)/負スコア=グレー)に合わせて再設計。旧実装は「無色」帯が無く
+      // ほぼ全セルに色が付いてしまい「平均並みも派手に強調される」状態だった。
+      // 母集団平均(複勝回収率71.2%)付近のraw -50~-5(表示-25~+20)は「無色」とし、
+      // 明確に平均を上回るraw -5~20(表示+20~+45)を黄色、raw 20+(表示+45+)をピンクに格上げする。
+      const EV_DISPLAY_SHIFT = 25;
+      function evScoreBg(edge) {
+        if (isNaN(edge)) return '';
+        if (edge >= 20)  return ' style="background:#fbcfe8"'; // ピンク（実測複勝回収率82.3%、n=145とやや薄いサンプル）
+        if (edge >= -5)  return ' style="background:#fef9c3"'; // 黄色（実測複勝回収率85.4%、最良帯）
+        if (edge >= -50) return '';                              // 無色（平均近辺、実測複勝回収率77.6%）
+        return ' style="background:#e5e7eb"';                    // グレー（実測複勝回収率55.8%、消し候補）
+      }
+      function evScoreCell(edge) {
+        if (isNaN(edge)) return '';
+        const disp = edge + EV_DISPLAY_SHIFT;
+        return `<span style="color:#333">${Math.round(disp)}</span>`;
+      }
       const infoIdxCell = idxCell(r.joho_index, true);
       const goalIdxCell = idxCell(r.goal_juni,  true);
       const idmIdxCell  = idxCell(r.idm,        true);
@@ -852,6 +911,13 @@
 
       const idmRaw  = parseFloat(String(r.idm ?? '').trim());
       const idmGray = idm3rdValue !== null && !isNaN(idmRaw) && idmRaw <= idm3rdValue - 5;
+
+      const myomiIdmMarkRaw = String(r.in_idm ?? '').trim();
+      const myomiGrade = anabaMyomiGrade(
+        parseFloat(String(r.anaba_course_score ?? '').trim()),
+        myomiIdmMarkRaw !== '' ? myomiIdmMarkRaw : null,
+        parseFloat(String(r.kijun_odds ?? '').trim())
+      );
 
       // 印セル背景色（他列と同様: ◎=ピンク, ○▲=緑）
       function markRankBg(rank) {
@@ -1066,16 +1132,17 @@
       const predictRank = predictMarks ? predictMarks[umaNumInt] : undefined;
       const predictMarkHtml = rankMarkHtml(predictRank ? Math.min(predictRank, 5) : undefined);
 
-      // ── 複勝回収率100%超シグナル（sc≥3 × 基準オッズ15〜30倍）─────────────
-      // 出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md
+      // ── 複勝妙味シグナル（複勝sc≥3 × 基準オッズ15〜30倍）─────────────
+      // 2026-10-04: 旧称「複勝回収率100%超シグナル」。先読みなしの検証で100%超は成り立たなかったため改称し、EX指数のしきい値を新方式の指数に合わせて 15/50→35/125 に変更（本命指数 10/30 は据え置き）。根拠: python/research/fukusho100_threshold_wf.py、document/指数/複勝妙味シグナル_仕様書.md
+      // src/server.ts の /api/watchlist（matchFukusho100）と同じ定義・しきい値
       // walk-forward検証済み: 学習101.1% / 評価2024年110.9% / 評価2025-26年100.5%（n=3,523、複勝的中率20.0%）
       const scComboN  = parseInt(String(r.combo_n ?? '').trim()) || 0;
       const scOi      = parseInt(String(r.oi_index ?? '').trim()) || 0;
       const scShiage  = parseInt(String(r.shiage_index ?? '').trim()) || 0;
       const scTenJuni   = parseInt(String(r.ten_index_juni   ?? '').trim());
       const scAgariJuni = parseInt(String(r.agari_index_juni ?? '').trim());
-      const scIdx       = ((!isNaN(anabaOverallScore) && anabaOverallScore >= 15) || (!isNaN(honmeiOverallScore) && honmeiOverallScore >= 10)) ? 1 : 0;
-      const scIdxStrong = ((!isNaN(anabaOverallScore) && anabaOverallScore >= 50) || (!isNaN(honmeiOverallScore) && honmeiOverallScore >= 30)) ? 1 : 0;
+      const scIdx       = ((!isNaN(anabaOverallScore) && anabaOverallScore >= 35) || (!isNaN(honmeiOverallScore) && honmeiOverallScore >= 10)) ? 1 : 0;
+      const scIdxStrong = ((!isNaN(anabaOverallScore) && anabaOverallScore >= 125) || (!isNaN(honmeiOverallScore) && honmeiOverallScore >= 30)) ? 1 : 0;
       const scCombo     = (scComboN >= 30 && !isNaN(comboRr) && comboRr >= 100) ? 1 : 0;
       const scChokyo    = (scOi >= 70 || scShiage >= 70) ? 1 : 0;
       const scGoal      = (!isNaN(goalJuniRaw) && (goalJuniRaw === 1 || goalJuniRaw === 2)) ? 1 : 0;
@@ -1084,7 +1151,7 @@
       const scTotal     = scIdx + scIdxStrong + scCombo + scChokyo + scGoal + scJoho + scTa;
       const isFukushoSignal = scTotal >= 3 && !isNaN(oddsV) && oddsV >= 15 && oddsV < 30;
       const fukushoTip = isFukushoSignal
-        ? `複勝回収率100%超シグナル（sc=${scTotal}点 × オッズ${oddsV.toFixed(1)}倍）\n過去データ検証: 複勝回収率100.7%・的中率20.0%（n=3,523、学習/評価の複数期間で再現）\n内訳: ${[scIdx&&'指数◎',scIdxStrong&&'指数◎◎',scCombo&&'騎×厩複勝100%+',scChokyo&&'調教充実',scGoal&&'展開1-2位',scJoho&&'情報印1-2位',scTa&&'テン/上がり1位'].filter(Boolean).join(' / ')}`
+        ? `複勝妙味シグナル（複勝sc=${scTotal}点 × オッズ${oddsV.toFixed(1)}倍）\n先読みなしの検証（2022〜2026）: 複勝回収率96.1%（同じオッズ帯の平均より+20.2pt）・3着内率19.2%。100%超は保証されない\n内訳: ${[scIdx&&'指数◎(EX35/本命10以上)',scIdxStrong&&'指数◎◎(EX125/本命30以上)',scCombo&&'騎×厩複勝100%+',scChokyo&&'調教充実',scGoal&&'展開1-2位',scJoho&&'情報印1-2位',scTa&&'テン/上がり1位'].filter(Boolean).join(' / ')}`
         : '';
       const rowClasses = [isChukiten && 'chukiten', isFukushoSignal && 'fukusho-signal'].filter(Boolean).join(' ');
 
@@ -1093,12 +1160,21 @@
         <td><strong>${parseInt(r.uma_num)}</strong></td>
         <td>${myMarkHtml}</td>
         <td>${predictMarkHtml}</td>
-        <td class="left horse-name"${fukushoTip ? ` data-tip="${fukushoTip.replace(/"/g,'&quot;')}"` : ''}>${r.uma_name?.trim() || ''}${isFukushoSignal ? ' <span style="color:#dc2626;font-size:.75rem;font-weight:700" title="複勝回収率100%超シグナル">🎯</span>' : ''}</td>
-        <td${blinkerBg}>${blinkerHtml}</td>
+        <td class="left horse-name"${fukushoTip ? ` data-tip="${fukushoTip.replace(/"/g,'&quot;')}"` : ''}>${r.uma_name?.trim() || ''}${isFukushoSignal ? ' <span style="color:#dc2626;font-size:.75rem;font-weight:700" title="複勝妙味シグナル">🎯</span>' : ''}</td>
+        <td>${blinkerHtml}</td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
-        <td class="group-sep col-divider"${anabaCourseBg}>${anabaCourseHtml}</td>
+        ${(() => {
+          // 列#8: sc（2026-10-04 期待値指数から差し替え。旧表示 evScoreBg/evScoreCell は削除せず残置）
+          const h = scByUma.get(parseInt(r.uma_num));
+          if (!h) return '<td class="group-sep col-divider"></td>';
+          const parts = h.sigs.filter(s => s.w !== 0).map(s => `${s.text}(${s.w > 0 ? '+' : ''}${s.w})`);
+          const yaji = String(r.chokyo_yajirushi ?? '').trim();
+          if (yaji === '4' || yaji === '5') parts.push('調教矢印↓(−2)');
+          const tip = `sc ${h.sc}：${parts.length ? parts.join(' / ') : 'シグナルなし'}`;
+          return `<td class="group-sep col-divider"${scBg(h.sc)} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:#333">${h.sc}</span></td>`;
+        })()}
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
-        <td class="group-sep"${honmeiCourseBg}>${honmeiCourseHtml}</td>
+        <td class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep"><span class="kyaku">${kyaku}</span></td>
         <td class="group-sep"${oddsRank === 1 ? ' style="background:#fbcfe8"' : (oddsRank === 2 || oddsRank === 3) ? ' style="background:#bbf7d0"' : ''}>${oddsDisp}</td>
         <td class="group-sep left">${r.kishu_name?.trim() || ''}</td>
@@ -1110,12 +1186,12 @@
         <td class="group-sep col-divider rank-col"${rankCellBg(r.ten_index_juni)}>${rankNumCell(r.ten_index_juni)}</td>
         <td class="rank-col"${rankCellBg(r.agari_index_juni)}>${rankNumCell(r.agari_index_juni)}</td>
         <td class="group-sep col-divider${stableYellow ? ' stable-yellow' : ''}">${stableDisp}</td>
-        <td class="kyt-cell${kytGrade ? ' kyt-' + kytGrade.toLowerCase() : ''}"${kytTip ? ` data-tip="${kytTip}"` : ''}>${kytGrade || ''}</td>
         <td class="group-sep"${(()=>{ const g=spGrades[i]; return g==='A'?' style="background:#fbcfe8"':g==='B'?' style="background:#bbf7d0"':g==='E'?' style="background:#e5e7eb"':''; })()}>${(()=>{
           const g = spGrades[i];
           if (!g) return '';
           return `<span class="sp-${g.toLowerCase()}">${g}</span>`;
         })()}</td>
+        <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep col-divider">${(()=>{
@@ -1165,6 +1241,8 @@
       const johoRaw  = parseInt(String(r.joho_index ?? '').trim());
       const joho     = (isNaN(johoRaw) || johoRaw === -1) ? null : johoRaw;
       const idm      = parseFloat(String(r.idm ?? '').trim()) || 0;
+      const idmMarkRaw = String(r.in_idm ?? '').trim();
+      const idmMark  = idmMarkRaw !== '' ? idmMarkRaw : null;
       const goalJuni = parseInt(String(r.goal_juni ?? '').trim()) || 99;
       const agariJuni= parseInt(String(r.agari_index_juni ?? '').trim()) || 99;
       const tenJuni  = parseInt(String(r.ten_index_juni ?? '').trim()) || 99;
@@ -1178,13 +1256,30 @@
       const kyushaN  = parseInt(r.kyusha_anaba_n) || 0;
       const kishu    = (r.kishu_name || '').trim();
       const trainer  = (r.trainer_name || '').trim();
+      const numOrNaN = v => { const s = String(v ?? '').trim(); return s === '' ? NaN : Number(s); };
+      const tenIdx   = numOrNaN(r.ten_index);
+      const agariIdx = numOrNaN(r.agari_index);
+      const idmV     = numOrNaN(r.idm);
+      const ninki    = numOrNaN(r.kijun_ninki);
       return {
         umaNum, umaName, odds, isHonmei, isAnaba, honmei, anaba,
-        joho, idm, goalJuni, agariJuni, tenJuni, style, yaji,
+        joho, idm, idmMark, goalJuni, agariJuni, tenJuni, style, yaji,
         oiIdx, shiIdx, comboPlaceRr, comboN, kyushaRr, kyushaN,
-        kishu, trainer,
+        kishu, trainer, tenIdx, agariIdx, idmV, ninki,
       };
     }).filter(h => !isNaN(h.umaNum) && h.umaNum > 0);
+
+    // ── 2026-10-04追加: 指数の抜け・市場評価とのずれ（src/server.ts の computeNotableScMap() と同じ定義・しきい値）
+    // しきい値は 2025年までのデータでの「上位20%の境目」。検証: python/research/sc_gap_wf.py
+    const SC_TEN_LEAD_MIN = 5.7, SC_AGARI_LEAD_MIN = 5.3, SC_NINKI_GAP_MIN = 3;
+    // レース内で1位の馬だけに「2位との差」を返す（同値1位が複数なら差0）。それ以外・値なしは NaN
+    function leadOf(key) {
+      const valid = horses.map(h => h[key]).filter(v => !isNaN(v)).sort((a, b) => b - a);
+      return h => (valid.length >= 2 && !isNaN(h[key]) && h[key] === valid[0]) ? valid[0] - valid[1] : NaN;
+    }
+    const tenLeadOf = leadOf('tenIdx'), agariLeadOf = leadOf('agariIdx');
+    // IDM のレース内順位（大きい順。同値は同順位＝最小の順位）
+    const idmRankOf = h => isNaN(h.idmV) ? NaN : 1 + horses.filter(o => !isNaN(o.idmV) && o.idmV > h.idmV).length;
 
     // ── ペースシナリオ ────────────────────────────────────
     const escCnt   = horses.filter(h => h.style === '1').length;
@@ -1231,8 +1326,8 @@
 
       // A. 指数シグナル（ゲートなし・常時評価）
       if (h.isHonmei && !isNaN(h.honmei)) {
-        if      (h.honmei >= 50) add('idx', `本命指数${h.honmei.toFixed(0)}（回収134%帯）`, 3);
-        else if (h.honmei >= 30) add('idx', `本命指数${h.honmei.toFixed(0)}（回収100%超）`, 2);
+        if      (h.honmei >= 50) add('idx', `本命指数${h.honmei.toFixed(0)}`, 3);
+        else if (h.honmei >= 30) add('idx', `本命指数${h.honmei.toFixed(0)}`, 2);
         else if (h.honmei >= 10) add('idx', `本命指数${h.honmei.toFixed(0)}`, 1);
       }
       if (h.isAnaba && !isNaN(h.anaba)) {
@@ -1240,6 +1335,9 @@
         else if (h.anaba >= 50)  add('idx', `EX指数${h.anaba.toFixed(0)}`, 2);
         else if (h.anaba >= 15)  add('idx', `EX指数${h.anaba.toFixed(0)}`, 1);
       }
+
+      // （旧A2. 穴妙味指数の加点 +3/+2 は 2026-10-04 に削除。穴妙味指数は先読みを除くと効果がなく、
+      //   scの検証もこの加点を含まない計算で行っているため。詳細: document/指数/sc_注目馬複合シグナル_仕様書.md）
 
       // B. 騎手×厩舎コンボ（能力フロア必須）
       if (abilityOk) {
@@ -1295,6 +1393,15 @@
 
       // 展開予測順位（能力フロア必須）
       if (abilityOk && h.goalJuni <= 2) add('goal', `展開予測${h.goalJuni}位通過`, 1);
+
+      // 2026-10-04追加: 指数の抜け・市場評価とのずれ（能力フロアに関係なく加点）
+      // 検証（毎年その年より前のデータで点数としきい値を決め直す方式）で、現行 sc と同じ頭数の上位馬の
+      // 複勝の上乗せが sc≥7 相当で +7.0→+11.4pt、実際の複勝回収率 87.1→89.7% に改善。詳細: document/指数/sc_注目馬複合シグナル_仕様書.md
+      const tenLead = tenLeadOf(h), agariLead = agariLeadOf(h), idmRank = idmRankOf(h);
+      if (tenLead >= SC_TEN_LEAD_MIN) add('lead', `テン指数1位（2位と+${tenLead.toFixed(1)}）`, 4);
+      if (agariLead >= SC_AGARI_LEAD_MIN) add('lead', `上がり指数1位（2位と+${agariLead.toFixed(1)}）`, 1);
+      if (!isNaN(h.ninki) && !isNaN(idmRank) && h.ninki - idmRank >= SC_NINKI_GAP_MIN)
+        add('gap', `人気${h.ninki}位・IDM${idmRank}位`, 2);
 
       return { sigs, sc, abilityOk };
     }
@@ -1360,8 +1467,10 @@
       joho:   'background:#fce7f3;color:#9d174d',
       gap:    'background:#ffedd5;color:#c2410c',
       pace:   'background:#ede9fe;color:#6d28d9',
+      lead:   'background:#ede9fe;color:#6d28d9',   // 指数の抜け（2026-10-04追加。色は既存の pace と同じ）
       chokyo: 'background:#ecfdf5;color:#047857',
       goal:   'background:#f0f9ff;color:#0369a1',
+      edge:   'background:#fbcfe8;color:#9d174d',
     };
     function sigTag(s) {
       const st = CAT_STYLE[s.cat] || 'background:#f3f4f6;color:#374151';
@@ -1383,9 +1492,9 @@
       const yajiStr  = YAJI_LABEL[h.yaji]  || '';
       const oddsStr  = h.odds >= 10 ? `${Math.round(h.odds)}倍` : `${h.odds.toFixed(1)}倍`;
       const filled = Math.min(h.sc, 6);
-      const dots = '●'.repeat(filled) + '○'.repeat(6 - filled);
-      const scLabel = h.sc > 6 ? `${dots} <span style="font-size:.78rem;color:#6b7280">${h.sc}pt</span>`
-                               : `${dots} <span style="font-size:.78rem;color:#d1d5db">${h.sc}pt</span>`;
+      // 塗り=濃色・空き=薄色で点数を判別しやすくする（pt数値は常に濃色で可読性確保）
+      const dots = `<span style="color:#374151">${'●'.repeat(filled)}</span><span style="color:#d1d5db">${'○'.repeat(6 - filled)}</span>`;
+      const scLabel = `${dots} <span style="font-size:.85rem;font-weight:700;color:${h.sc > 6 ? '#dc2626' : '#374151'};letter-spacing:0">${h.sc}pt</span>`;
       const borderColor = h.isHonmei ? '#f9a8d4' : '#6ee7b7';
       html += `<div style="border-left:4px solid ${borderColor};padding:8px 10px;background:#fafafa;border-radius:0 6px 6px 0;display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

@@ -213,9 +213,9 @@
         <div class="cond-row">
           <div class="cond-cell">
             <span class="cond-label">期間</span>
-            <input type="text" class="ymd-input" id="ymd_from">
+            <input type="text" class="ymd-input" id="ymd_from" value="20200101">
             <span class="sep">〜</span>
-            <input type="text" class="ymd-input" id="ymd_to">
+            <input type="text" class="ymd-input" id="ymd_to" value="20301231">
           </div>
           <div class="cond-cell">
             <span class="cond-label">競馬場</span>
@@ -899,8 +899,9 @@
 
   document.getElementById('btn-reset').addEventListener('click', () => {
     // テキスト入力をクリア
-    ['ymd_from','ymd_to',
-     'odds_from','odds_to',
+    document.getElementById('ymd_from').value = '20200101';
+    document.getElementById('ymd_to').value = '20301231';
+    ['odds_from','odds_to',
      'idm_idx_from','idm_idx_to',
      'kyusha_idx_from','kyusha_idx_to',
      'oikiri_from','oikiri_to','shiage_from','shiage_to',

@@ -24,7 +24,6 @@ const TENKAI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'tenkai_index.sql');
 const PACEFIT_SQL_FILE  = path.join(__dirname, '..', 'sql', 'pacefit_index.sql');
 const HONMEI_SQL_FILE   = path.join(__dirname, '..', 'sql', 'honmei_index.sql');
 const COURSE_RECOVERY_SQL_FILE = path.join(__dirname, '..', 'sql', 'course_recovery_index.sql');
-const BLINKER_SQL_FILE = path.join(__dirname, '..', 'sql', 'blinker_index.sql');
 const FURI_SQL_FILE    = path.join(__dirname, '..', 'sql', 'furi_index.sql');
 const KYUSHA_SQL_FILE   = path.join(__dirname, '..', 'sql', 'kyusha_analysis.sql');
 
@@ -60,12 +59,6 @@ const COURSE_RECOVERY_PART_LABELS: Record<number, string> = {
   1: 'テーブル定義 (CREATE TABLE)',
   2: '全体ファクター集計 (T_COURSE_RECOVERY_FACTOR_AGG)',
   3: '指数計算 (T_COURSE_RECOVERY_SCORE)',
-};
-
-const BLINKER_PART_LABELS: Record<number, string> = {
-  1: 'テーブル定義 (CREATE TABLE)',
-  2: 'ファクター集計 (T_BLINKER_FACTOR_AGG)',
-  3: '指数計算 (T_BLINKER_SCORE)',
 };
 
 const FURI_PART_LABELS: Record<number, string> = {
@@ -138,7 +131,7 @@ function runMysqlSql(sql: string): Promise<void> {
 }
 
 /** ETL多重実行防止用ロック。同じ指数のETLが実行中は次のリクエストを即エラーにする。 */
-const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, blinker: false, furi: false, kyusha: false };
+const etlLocks: Record<string, boolean> = { anaba: false, honmei: false, tenkai: false, pacefit: false, analyzeFact: false, courseRecovery: false, furi: false, kyusha: false, evIndex: false };
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -468,12 +461,13 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             k.kijun_odds, k.kijun_ninki,
             k.joho_index,
             k.idm,
+            k.in_idm,
             k.goal_juni,
             k.kyusha_index,
             k.kishu_name, k.trainer_name,
             k.kishu_code, k.trainer_code,
             k.ten_index_juni, k.agari_index_juni, k.ichi_index_juni, k.blinker,
-            bls.grade AS blinker_grade,
+            k.ten_index, k.agari_index,
             fs.grade AS furi_grade, fs.score AS furi_score,
             fs.prev_furi_degree, fs.prev_furi_phase, fs.is_hot AS furi_is_hot,
             k.chokyo_yajirushi,
@@ -492,6 +486,14 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             kya.anaba_win_rate  AS kyusha_anaba_win_rate,
             kya.anaba_place_rate AS kyusha_anaba_place_rate,
             kya.anaba_n         AS kyusha_anaba_n,
+            kyn.score          AS kyn_score,
+            kyn.ki_band        AS kyn_ki_band,
+            kyn.ninki_band     AS kyn_ninki_band,
+            kyn.total_count    AS kyn_n,
+            kyn.win_recovery   AS kyn_win_rr,
+            kyn.place_recovery AS kyn_place_rr,
+            kyn.base_place_rr  AS kyn_base_rr,
+            kyn.place_excess   AS kyn_excess,
             ans.overall_score AS anaba_overall_score,
             ans.course_score  AS anaba_course_score,
             ans.score_ten, ans.score_agari, ans.score_ichi, ans.score_goal,
@@ -524,6 +526,11 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
             hms.score_blood_c       AS hms_score_blood_c,
             pfs.overall_score AS pacefit_score,
             pfs.pace_yoso     AS pacefit_pace,
+            evs.pred_place_prob AS ev_pred_place_prob,
+            evs.market_place_prob AS ev_market_place_prob,
+            evs.ev_index      AS ev_index,
+            evs.race_rank     AS ev_race_rank,
+            evs.race_rank_from_last AS ev_race_rank_from_last,
             mm.mark           AS my_mark,
             s.order_of_finish AS result_order,
             s.win             AS result_win,
@@ -549,6 +556,16 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
          AND factor_value = 'plus_15~'
        GROUP BY trainer_code
      ) kya ON kya.trainer_code = k.trainer_code
+     -- 厩舎穴指数: 厩舎指数の帯 × 基準人気の帯で区分表を引く（sql/kyusha_ninki_index.sql と同じ区切り）
+     LEFT JOIN T_KYUSHA_NINKI_AGG kyn
+       ON  TRIM(k.kyusha_index) REGEXP '^-?[0-9]+([.][0-9]+)?$'
+       AND TRIM(k.kijun_ninki) REGEXP '^[0-9]+$' AND CAST(TRIM(k.kijun_ninki) AS UNSIGNED) >= 1
+       AND kyn.ki_band = CASE WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(5,1)) < 0 THEN '<0'
+                              WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(5,1)) < 8 THEN '0-8'
+                              WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(5,1)) < 15 THEN '8-15' ELSE '15+' END
+       AND kyn.ninki_band = CASE WHEN CAST(TRIM(k.kijun_ninki) AS UNSIGNED) <= 5 THEN '1-5'
+                                 WHEN CAST(TRIM(k.kijun_ninki) AS UNSIGNED) <= 8 THEN '6-8'
+                                 WHEN CAST(TRIM(k.kijun_ninki) AS UNSIGNED) <= 10 THEN '9-10' ELSE '11+' END
      LEFT JOIN T_ANABA_SCORE ans
        ON  ans.course_code = k.course_code AND ans.year_code = k.year_code
        AND ans.kai = k.kai AND ans.day_code = k.day_code
@@ -561,14 +578,14 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
        ON  pfs.course_code = k.course_code AND pfs.year_code = k.year_code
        AND pfs.kai = k.kai AND pfs.day_code = k.day_code
        AND pfs.race_num = k.race_num AND pfs.uma_num = k.uma_num
-     LEFT JOIN T_BLINKER_SCORE bls
-       ON  bls.course_code = k.course_code AND bls.year_code = k.year_code
-       AND bls.kai = k.kai AND bls.day_code = k.day_code
-       AND bls.race_num = k.race_num AND bls.uma_num = k.uma_num
      LEFT JOIN T_FURI_SCORE fs
        ON  fs.course_code = k.course_code AND fs.year_code = k.year_code
        AND fs.kai = k.kai AND fs.day_code = k.day_code
        AND fs.race_num = k.race_num AND fs.uma_num = k.uma_num
+     LEFT JOIN T_EV_SCORE evs
+       ON  evs.course_code = k.course_code AND evs.year_code = k.year_code
+       AND evs.kai = k.kai AND evs.day_code = k.day_code
+       AND evs.race_num = k.race_num AND evs.uma_num = k.uma_num
      LEFT JOIN T_MY_MARK mm
        ON  mm.course_code = k.course_code AND mm.year_code = k.year_code
        AND mm.kai = k.kai AND mm.day_code = k.day_code
@@ -1185,8 +1202,34 @@ interface NotableScRow {
   uma_num: string;
   kijun_odds: any; honmei_course: any; ex_course: any; joho_index: any; idm: any;
   goal_juni: any; ten_index_juni: any; agari_index_juni: any;
-  kyakushitsu: any; chokyo_yajirushi: any; oi_index: any;
+  kyakushitsu: any; chokyo_yajirushi: any; oi_index: any; in_idm: any;
   combo_place_rr: any; combo_n: any; kyusha_anaba_place_rr: any; kyusha_anaba_n: any;
+  ten_index: any; agari_index: any; kijun_ninki: any;
+}
+
+// 2026-10-04追加シグナル（entries.html の evaluateRaceSignals() と同じ定義・しきい値）
+// しきい値は 2025年までのデータでの「上位20%の境目」。検証: python/research/sc_gap_wf.py
+export const SC_TOP_MIN = 9;   // ウォッチリスト「sc上位」のしきい値（2026-10-05）
+export const SC_TEN_LEAD_MIN = 5.7;    // テン指数1位で、2位との差がこれ以上 → +4
+export const SC_AGARI_LEAD_MIN = 5.3;  // 上がり指数1位で、2位との差がこれ以上 → +1
+export const SC_NINKI_GAP_MIN = 3;     // 人気順位 − IDM順位 がこれ以上 → +2
+
+// レース内で1位の馬だけに「2位との差」を返す（同値1位が複数なら差0）。それ以外・値なしは NaN
+function leadMap(vals: number[]): number[] {
+  const valid = vals.filter(v => !isNaN(v)).sort((a, b) => b - a);
+  if (valid.length < 2) return vals.map(() => NaN);
+  const top = valid[0], second = valid[1];
+  return vals.map(v => (!isNaN(v) && v === top) ? top - second : NaN);
+}
+
+// 穴妙味指数グレード: entries.htmlのanabaMyomiGrade()と同一ロジック
+// IDM印なし×基準オッズ15〜30倍で、EX指数(コース)≧100→A、50〜100→B。詳細: document/指数/【廃】穴妙味指数_仕様書.md
+function anabaMyomiGrade(anaba: number, inIdm: any, odds: number): 'A' | 'B' | null {
+  if (isNaN(anaba) || String(inIdm ?? '').trim() !== '') return null;
+  if (isNaN(odds) || odds < 15 || odds > 30) return null;
+  if (anaba >= 100) return 'A';
+  if (anaba >= 50) return 'B';
+  return null;
 }
 
 function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
@@ -1212,8 +1255,17 @@ function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
     const comboN = Number(r.combo_n) || 0;
     const kyushaRr = Number(r.kyusha_anaba_place_rr) || 0;
     const kyushaN = Number(r.kyusha_anaba_n) || 0;
-    return { r, odds, isHonmei, isAnaba, honmei, anaba, joho, idm, goalJuni, agariJuni, tenJuni, style, yaji, oiIdx, comboPlaceRr, comboN, kyushaRr, kyushaN };
+    const num = (v: any) => { const s = String(v ?? '').trim(); return s === '' ? NaN : Number(s); };
+    const tenIdx = num(r.ten_index);
+    const agariIdx = num(r.agari_index);
+    const idmV = num(r.idm);
+    const ninki = num(r.kijun_ninki);
+    return { r, odds, isHonmei, isAnaba, honmei, anaba, joho, idm, goalJuni, agariJuni, tenJuni, style, yaji, oiIdx, comboPlaceRr, comboN, kyushaRr, kyushaN, tenIdx, agariIdx, idmV, ninki };
   });
+  const tenLead = leadMap(horses.map(h => h.tenIdx));
+  const agariLead = leadMap(horses.map(h => h.agariIdx));
+  // IDM のレース内順位（大きい順。同値は同順位＝最小の順位）
+  const idmRank = horses.map(h => isNaN(h.idmV) ? NaN : 1 + horses.filter(o => !isNaN(o.idmV) && o.idmV > h.idmV).length);
 
   const escCnt = horses.filter(h => h.style === '1').length;
   const senCnt = horses.filter(h => h.style === '2').length;
@@ -1249,6 +1301,7 @@ function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
     if (h.isAnaba && !isNaN(h.anaba)) {
       if (h.anaba >= 100) sc += 3; else if (h.anaba >= 50) sc += 2; else if (h.anaba >= 15) sc += 1;
     }
+    // （穴妙味指数A/Bの加点は 2026-10-04 に削除。entries.html と同じ。詳細: document/指数/sc_注目馬複合シグナル_仕様書.md）
     if (abilityOk) {
       if (h.comboN >= 10 && h.comboPlaceRr >= 130) sc += 3;
       else if (h.comboN >= 7 && h.comboPlaceRr >= 110) sc += 2;
@@ -1279,6 +1332,12 @@ function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
     }
     if (abilityOk && h.goalJuni <= 2) sc += 1;
 
+    // 2026-10-04追加: 指数の抜け・市場評価とのずれ（能力フロアに関係なく加点）
+    const i = horses.indexOf(h);
+    if (tenLead[i] >= SC_TEN_LEAD_MIN) sc += 4;
+    if (agariLead[i] >= SC_AGARI_LEAD_MIN) sc += 1;
+    if (!isNaN(h.ninki) && !isNaN(idmRank[i]) && h.ninki - idmRank[i] >= SC_NINKI_GAP_MIN) sc += 2;
+
     result.set(h.r.uma_num, sc);
   }
   return result;
@@ -1288,16 +1347,148 @@ function computeNotableScMap(raceRows: NotableScRow[]): Map<string, number> {
 // 指数帯別回収率API: EX指数帯・本命指数帯・厩指穴信頼グレード別の回収率集計
 // ────────────────────────────────────────────────────────────────────────────
 
-let factorRecoveryCache: { exIndex: any[]; honmeiIndex: any[]; kyushaTrust: any[]; furiIndex: any[]; blinkerIndex: any[]; scIndex: any[]; updatedAt: string } | null = null;
+let factorRecoveryCache: { exIndex: any[]; honmeiIndex: any[]; kyushaTrust: any[]; evIndex: any[]; favoriteReliability: any[]; myomiGrade: any[]; updatedAt: string } | null = null;
 
-// ── sc(注目馬複合シグナル)帯別の回収率集計 ──
-// T_ANALYZE_FACTにはjoho_index生値・chokyo_yajirushi・combo/kyusha統計が無いため、
-// T_KYI等の元テーブルから直接JOINしてレース単位でscを計算する。
+// ── 1番人気信頼度（entries.htmlのcalcFavoriteReliabilityを移植）帯別の回収率集計 ──
+// IDM・情報指数・展開・調教矢印・追切/仕上指数・テン/上がり指数順位はすべてレース前に判明する
+// その場限りの値（過去実績の集計テーブルに依存しない）ため、先読みバイアスの心配がない。
+interface FavoriteRow {
+  uma_num: string; kijun_ninki: any; idm: any; joho_index: any; goal_juni: any;
+  chokyo_yajirushi: any; oi_index: any; shiage_index: any; ten_index_juni: any; agari_index_juni: any;
+}
+function computeFavoriteGrade(rows: FavoriteRow[]): string | null {
+  if (!rows || rows.length < 2) return null;
+  const fav = rows.find(r => parseInt(String(r.kijun_ninki ?? '').trim()) === 1);
+  if (!fav) return null;
+
+  let score = 0;
+
+  const idmVals = rows.map(r => { const v = parseFloat(String(r.idm ?? '').trim()); return (isNaN(v) || v === 0) ? null : v; });
+  const favIdm = parseFloat(String(fav.idm ?? '').trim());
+  if (!isNaN(favIdm) && favIdm !== 0) {
+    const sorted = idmVals.filter((v): v is number => v !== null).sort((a, b) => b - a);
+    const rank = sorted.indexOf(favIdm) + 1;
+    const gap = (rank === 1 && sorted.length >= 2) ? favIdm - sorted[1] : 0;
+    const pt = rank === 1 ? (gap >= 5 ? 40 : gap >= 3 ? 30 : gap >= 1 ? 20 : 10)
+             : rank === 2 ? 0 : rank === 3 ? -10 : -20;
+    score += pt;
+  }
+
+  const johoVals = rows.map(r => { const v = parseInt(String(r.joho_index ?? '').trim()); return (isNaN(v) || v === -1) ? null : v; });
+  const favJoho = parseInt(String(fav.joho_index ?? '').trim());
+  if (!isNaN(favJoho) && favJoho !== -1) {
+    const sorted = johoVals.filter((v): v is number => v !== null).sort((a, b) => b - a);
+    const rank = sorted.indexOf(favJoho) + 1;
+    const pt = rank === 1 ? 20 : rank === 2 ? 5 : rank === 3 ? 0 : rank <= 5 ? -5 : -15;
+    score += pt;
+  }
+
+  const goalVals = rows.map(r => { const v = parseInt(String(r.goal_juni ?? '').trim()); return (isNaN(v) || v === 0) ? null : v; });
+  const favGoal = parseInt(String(fav.goal_juni ?? '').trim());
+  if (!isNaN(favGoal) && favGoal > 0) {
+    const sorted = goalVals.filter((v): v is number => v !== null).sort((a, b) => a - b);
+    const rank = sorted.indexOf(favGoal) + 1;
+    const pt = rank === 1 ? 15 : rank <= 3 ? 10 : rank <= 5 ? 5 : rank <= 7 ? 0 : -10;
+    score += pt;
+  }
+
+  const yaji = String(fav.chokyo_yajirushi ?? '').trim();
+  const yajiMap: Record<string, number> = { '1': 15, '2': 8, '3': 0, '4': -10, '5': -20 };
+  if (yaji in yajiMap) score += yajiMap[yaji];
+
+  const favIdx = rows.indexOf(fav);
+  for (const field of ['oi_index', 'shiage_index'] as const) {
+    const vals = rows.map(r => { const v = parseInt(String((r as any)[field] ?? '').trim()); return (isNaN(v) || v === 0) ? null : v; });
+    const fv = vals[favIdx];
+    if (fv === null) continue;
+    const sorted = vals.filter((v): v is number => v !== null).sort((a, b) => b - a);
+    const rank = sorted.indexOf(fv) + 1;
+    const pt = rank === 1 ? 8 : rank <= 3 ? 3 : rank <= 5 ? 0 : -5;
+    score += pt;
+  }
+
+  const ten = parseInt(String(fav.ten_index_juni ?? '').trim());
+  const agari = parseInt(String(fav.agari_index_juni ?? '').trim());
+  if (!isNaN(ten) && ten > 0) score += ten === 1 ? 5 : ten <= 3 ? 2 : ten >= 7 ? -3 : 0;
+  if (!isNaN(agari) && agari > 0) score += agari === 1 ? 5 : agari <= 3 ? 2 : agari >= 7 ? -3 : 0;
+
+  return score >= 70 ? 'S' : score >= 55 ? 'A' : score >= 25 ? 'B' : score >= 0 ? 'C' : score >= -20 ? 'D' : 'E';
+}
+
+async function computeFavoriteRecovery(): Promise<any[]> {
+  const [rows] = await pool.query<any>(
+    `SELECT k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
+            k.kijun_ninki, k.idm, k.joho_index, k.goal_juni, k.chokyo_yajirushi,
+            k.ten_index_juni, k.agari_index_juni,
+            c.oi_index, c.shiage_index,
+            s.order_of_finish, s.win AS win_pay, s.place AS place_pay, s.ijou_kubun
+     FROM T_KYI k
+     LEFT JOIN T_CYB c
+       ON  c.course_code = k.course_code AND c.year_code = k.year_code
+       AND c.kai = k.kai AND c.day_code = k.day_code AND c.race_num = k.race_num AND c.uma_num = k.uma_num
+     JOIN T_SED s
+       ON  s.course_code = k.course_code AND s.year_code = k.year_code
+       AND s.kai = k.kai AND s.day_code = k.day_code AND s.race_num = k.race_num AND s.umaban = k.uma_num
+     WHERE s.order_of_finish IS NOT NULL`
+  );
+
+  const raceGroups = new Map<string, any[]>();
+  for (const r of rows as any[]) {
+    const raceKey = `${r.course_code}_${r.year_code}_${r.kai}_${r.day_code}_${r.race_num}`;
+    if (!raceGroups.has(raceKey)) raceGroups.set(raceKey, []);
+    raceGroups.get(raceKey)!.push(r);
+  }
+
+  const gradeOrder = ['S', 'A', 'B', 'C', 'D', 'E'];
+  type Bucket = { total: number; win: number; renso: number; place: number; winPay: number; placePay: number };
+  const buckets = new Map<string, Bucket>();
+
+  for (const raceRs of raceGroups.values()) {
+    const grade = computeFavoriteGrade(raceRs as FavoriteRow[]);
+    if (!grade) continue;
+    const fav = raceRs.find(r => parseInt(String(r.kijun_ninki ?? '').trim()) === 1)!;
+    const finish = parseInt(String(fav.order_of_finish ?? '').trim());
+    if (isNaN(finish)) continue;
+    const normal = fav.ijou_kubun === '0' || fav.ijou_kubun === '' || fav.ijou_kubun === null;
+    const winPay = normal ? (Number(String(fav.win_pay ?? '').trim()) || 0) : 0;
+    const placePay = normal ? (Number(String(fav.place_pay ?? '').trim()) || 0) : 0;
+    const b = buckets.get(grade) ?? { total: 0, win: 0, renso: 0, place: 0, winPay: 0, placePay: 0 };
+    b.total += 1;
+    if (finish === 1) b.win += 1;
+    if (finish <= 2) b.renso += 1;
+    if (finish <= 3) b.place += 1;
+    b.winPay += winPay;
+    b.placePay += placePay;
+    buckets.set(grade, b);
+  }
+
+  return gradeOrder
+    .filter(g => buckets.has(g))
+    .map(g => {
+      const bk = buckets.get(g)!;
+      return {
+        band_key: g, band_label: g,
+        total_count: bk.total,
+        win_count: bk.win, renso_count: bk.renso, place_count: bk.place,
+        win_rate: Math.round(bk.win / bk.total * 1000) / 10,
+        renso_rate: Math.round(bk.renso / bk.total * 1000) / 10,
+        place_rate: Math.round(bk.place / bk.total * 1000) / 10,
+        win_recovery: Math.round(bk.winPay / bk.total * 10) / 10,
+        place_recovery: Math.round(bk.placePay / bk.total * 10) / 10,
+      };
+    });
+}
+
+// ── 旧: sc(注目馬複合シグナル)帯別の回収率集計 ──
+// 2026-09-27、この生集計はcombo/kyushaの現在値を過去全期間に遡って適用するため先読みバイアスを含むと判明。
+// factor-recovery.htmlのsc欄は代わりに「注目馬複合シグナル_walk-forward検証レポート.md」の
+// 検証済み数値（静的テーブル）を表示するように変更したため、本関数は現在未使用（削除はせず残置）。
 async function computeScRecovery(): Promise<any[]> {
   const [rows] = await pool.query<any>(
     `SELECT k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
-            k.kijun_odds, k.joho_index, k.idm, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
-            k.kyakushitsu, k.chokyo_yajirushi,
+            k.kijun_odds, k.kijun_ninki, k.joho_index, k.idm, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
+            k.ten_index, k.agari_index,
+            k.kyakushitsu, k.chokyo_yajirushi, k.in_idm,
             c.oi_index,
             cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
             kya.anaba_place_rr AS kyusha_anaba_place_rr, kya.anaba_n AS kyusha_anaba_n,
@@ -1509,44 +1700,83 @@ async function computeFactorRecovery() {
      ORDER BY FIELD(grade, 'S','A','B','C','D','E','F')`
   );
 
-  // ── ブリンカー指数グレード別（設計: document/指数/ブリンカー指数_仕様書.md）──
-  // バックテストにより連続値としての中間解像度は低いことが判明しているため、A/B/C の3段階グレードのみ集計する
-  let blinkerIndexRows: any[] = [];
+  // ── 期待値指数帯（T_EV_SCORE.ev_index、entries.htmlのevScoreBgと同じ閾値）──
+  // オッズ帯別isotonic較正・センチネル除外済みのため先読みバイアスの懸念なし
+  let evIndexRows: any[] = [];
   try {
-  [blinkerIndexRows] = await pool.query<any>(
+  [evIndexRows] = await pool.query<any>(
     `SELECT band_key, band_label, ${rateSelect}
      FROM (
        SELECT
-         CONCAT(s.blinker_type, s.grade) AS band_key,
-         CONCAT(CASE WHEN s.blinker_type='1' THEN '初装着' ELSE '再装着' END, ' ',
-                CASE s.grade WHEN 'A' THEN 'A(高評価)' WHEN 'C' THEN 'C(低評価)' ELSE 'B(中立)' END) AS band_label,
-         (f.order_of_finish = 1)      AS win_flag,
-         (f.order_of_finish <= 2)     AS renso_flag,
-         (f.order_of_finish <= 3)     AS place_flag,
-         COALESCE(f.win_pay, 0)   AS win_pay,
-         COALESCE(f.place_pay, 0) AS place_pay
-       FROM T_BLINKER_SCORE s
-       INNER JOIN T_ANALYZE_FACT f
-         ON  f.course_code=s.course_code AND f.year_code=s.year_code AND f.kai=s.kai
-         AND f.day_code=s.day_code AND f.race_num=s.race_num AND f.uma_num=s.uma_num
-       WHERE f.order_of_finish IS NOT NULL
+         CASE
+           WHEN ev.ev_index < -50 THEN '1'
+           WHEN ev.ev_index < -5  THEN '2'
+           WHEN ev.ev_index < 20  THEN '3'
+           ELSE '4'
+         END AS band_key,
+         CASE
+           WHEN ev.ev_index < -50 THEN '-50未満'
+           WHEN ev.ev_index < -5  THEN '-50〜-5'
+           WHEN ev.ev_index < 20  THEN '-5〜20'
+           ELSE '20以上'
+         END AS band_label,
+         (CAST(s.order_of_finish AS UNSIGNED) = 1)  AS win_flag,
+         (CAST(s.order_of_finish AS UNSIGNED) <= 2) AS renso_flag,
+         (CAST(s.order_of_finish AS UNSIGNED) <= 3) AS place_flag,
+         CASE WHEN s.ijou_kubun IN ('0','') THEN COALESCE(CAST(TRIM(s.win)   AS UNSIGNED), 0) ELSE 0 END AS win_pay,
+         CASE WHEN s.ijou_kubun IN ('0','') THEN COALESCE(CAST(TRIM(s.place) AS UNSIGNED), 0) ELSE 0 END AS place_pay
+       FROM T_EV_SCORE ev
+       JOIN T_SED s
+         ON  s.course_code=ev.course_code AND s.year_code=ev.year_code AND s.kai=ev.kai
+         AND s.day_code=ev.day_code AND s.race_num=ev.race_num AND s.umaban=ev.uma_num
+       WHERE ev.ev_index IS NOT NULL AND s.order_of_finish IS NOT NULL
      ) t
      GROUP BY band_key, band_label
      ORDER BY band_key`
   );
-  } catch { /* T_BLINKER_SCORE 未構築の場合は空配列のまま */ }
+  } catch { /* T_EV_SCORE 未構築の場合は空配列のまま */ }
 
-  // ── sc(注目馬複合シグナル)帯別（設計: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md）──
-  let scRows: any[] = [];
-  try { scRows = await computeScRecovery(); }
+  // ── 1番人気信頼度グレード別（entries.htmlの本命信頼度バッジと同じ計算式）──
+  // 全フィールドがレース前公表値のみで構成されており、過去集計テーブルに依存しないため先読みバイアスなし
+  let favoriteReliabilityRows: any[] = [];
+  try { favoriteReliabilityRows = await computeFavoriteRecovery(); }
   catch { /* 元テーブル未構築等の場合は空配列のまま */ }
+
+  // ── 穴妙味指数グレード別（entries.html列#25と同じ定義: course_score≧100→A, 50-100→B）──
+  // T_ANABA_SCORE.course_score × T_KYI.in_idm IS NULL × 基準オッズ15-30倍のセグメント限定
+  let myomiRows: any[] = [];
+  try {
+  [myomiRows] = await pool.query<any>(
+    `SELECT band_key, band_label, ${rateSelect}
+     FROM (
+       SELECT
+         CASE WHEN a.course_score>=100 THEN 'A' ELSE 'B' END AS band_key,
+         CASE WHEN a.course_score>=100 THEN 'A' ELSE 'B' END AS band_label,
+         (CAST(s.order_of_finish AS UNSIGNED) = 1)  AS win_flag,
+         (CAST(s.order_of_finish AS UNSIGNED) <= 2) AS renso_flag,
+         (CAST(s.order_of_finish AS UNSIGNED) <= 3) AS place_flag,
+         CASE WHEN s.ijou_kubun IN ('0','') THEN COALESCE(CAST(TRIM(s.win)   AS UNSIGNED), 0) ELSE 0 END AS win_pay,
+         CASE WHEN s.ijou_kubun IN ('0','') THEN COALESCE(CAST(TRIM(s.place) AS UNSIGNED), 0) ELSE 0 END AS place_pay
+       FROM T_ANABA_SCORE a
+       JOIN T_KYI k ON k.course_code=a.course_code AND k.year_code=a.year_code AND k.kai=a.kai
+         AND k.day_code=a.day_code AND k.race_num=a.race_num AND k.uma_num=a.uma_num
+       JOIN T_SED s ON s.course_code=a.course_code AND s.year_code=a.year_code AND s.kai=a.kai
+         AND s.day_code=a.day_code AND s.race_num=a.race_num AND s.umaban=a.uma_num
+       WHERE a.course_score>=50 AND k.in_idm IS NULL AND s.order_of_finish IS NOT NULL
+         AND TRIM(k.kijun_odds)<>'' AND CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) BETWEEN 15 AND 30
+     ) t
+     GROUP BY band_key, band_label
+     ORDER BY band_key`
+  );
+  } catch { /* T_ANABA_SCORE 未構築の場合は空配列のまま */ }
 
   return {
     exIndex: exRows as any[],
     honmeiIndex: honmeiRows as any[],
     kyushaTrust: kyushaRows as any[],
-    blinkerIndex: blinkerIndexRows as any[],
-    scIndex: scRows,
+    evIndex: evIndexRows as any[],
+    favoriteReliability: favoriteReliabilityRows,
+    myomiGrade: myomiRows as any[],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1619,7 +1849,8 @@ app.get('/api/watchlist', async (req, res) => {
             k.uma_num, k.waku_num, k.uma_name, k.kishu_name, k.trainer_name, k.trainer_code,
             k.kijun_odds, k.kijun_ninki, k.kyusha_index,
             k.joho_index, k.idm, k.goal_juni, k.ten_index_juni, k.agari_index_juni,
-            k.kyakushitsu, k.chokyo_yajirushi, k.blinker,
+            k.ten_index, k.agari_index,
+            k.kyakushitsu, k.chokyo_yajirushi, k.in_idm,
             c.oi_index, c.shiage_index,
             cr.place_recovery AS combo_place_rr, cr.total_count AS combo_n,
             kya.anaba_place_rr AS kyusha_anaba_place_rr, kya.anaba_n AS kyusha_anaba_n,
@@ -1627,7 +1858,6 @@ app.get('/api/watchlist', async (req, res) => {
             ans.overall_score AS ex_overall,
             hms.course_score  AS honmei_course,
             hms.overall_score AS honmei_overall,
-            bls.grade AS blinker_grade,
             s.order_of_finish, s.win AS win_pay, s.place AS place_pay, s.ijou_kubun
      FROM T_BAC b
      JOIN T_KYI k
@@ -1657,10 +1887,6 @@ app.get('/api/watchlist', async (req, res) => {
        ON  hms.course_code = k.course_code AND hms.year_code = k.year_code
        AND hms.kai = k.kai AND hms.day_code = k.day_code
        AND hms.race_num = k.race_num AND hms.uma_num = k.uma_num
-     LEFT JOIN T_BLINKER_SCORE bls
-       ON  bls.course_code = k.course_code AND bls.year_code = k.year_code
-       AND bls.kai = k.kai AND bls.day_code = k.day_code
-       AND bls.race_num = k.race_num AND bls.uma_num = k.uma_num
      LEFT JOIN T_SED s
        ON  s.course_code = k.course_code AND s.year_code = k.year_code
        AND s.kai = k.kai AND s.day_code = k.day_code
@@ -1673,7 +1899,7 @@ app.get('/api/watchlist', async (req, res) => {
   );
 
   // 情報指数のレース内順位（denseRank・降順）を先に算出する。0/NULL/-1(非開示)は対象外。
-  // entries.html の denseRanks() と同じロジック（複勝回収率100%超シグナルの情報印1〜2位判定に使用）。
+  // entries.html の denseRanks() と同じロジック（複勝妙味シグナルの情報印1〜2位判定に使用）。
   const johoValsByRace = new Map<string, Set<number>>();
   for (const r of rows as any[]) {
     const raceKey = `${r.course_code}_${r.kai}_${r.day_code}_${r.race_num}`;
@@ -1718,25 +1944,30 @@ app.get('/api/watchlist', async (req, res) => {
       // 本命指数はオッズ<10倍、EX指数はオッズ≧10倍の馬にのみ意味を持つ（entries.htmlのisHonmei/isAnabaと同じゲート）
       const isHonmei = odds !== null && odds > 0 && odds < 10;
       const isAnaba = odds !== null && odds >= 10;
-      const matchHonmei = isHonmei && honmei !== null && honmei >= 50 && ninki !== null && ninki !== 1;
-      // EX指数(コース)は実データ検証の結果、複勝回収率が100%を超えるのは100以上の帯のみ
-      // （kijun_odds≥10の母集団: 100+→複勝100.1%、90〜99→75.7%、以下単調に低下、2026-09-06確認）
-      const matchEx = isAnaba && ex !== null && ex >= 100;
+      // 本命指数(コース)≧50×非1番人気トリガー
+      // 2026-09-27、無効化。walk-forward検証（学習2020-2023/検証2024-2026）で単勝回収率75.4%→76.9%→
+      // 81.7%と3年間すべて100%を大きく下回ったまま安定して低空飛行と判明（複勝回収率も77.2〜81.8%）。
+      // EX指数・厩指穴信頼・ブリンカー指数（2026-10-05廃止）と同型の「全期間集計では良さそうでも真のholdoutで崩壊」パターン。
+      // 変数・APIフィールドは残置。
+      const matchHonmei = false;
+      // EX指数(コース)≧100トリガー
+      // 2026-09-27、無効化。旧コメントは「2026-09-06確認・複勝100.1%」としていたが、その後の正式な
+      // walk-forward検証（学習2020-2023/検証2024-2026）でこの帯は実測76.4%まで崩壊すると判明済み
+      // （CLAUDE.md「指数/スコアETL実装時の必須チェック」4番）。矛盾したまま放置され、以前実際に
+      // このトリガーで実損失が出た事故があった。変数・APIフィールドは残置。
+      const matchEx = false;
 
-      // 厩指穴信頼グレードは、この馬自身が対象セグメント（基準オッズ≧15 かつ 厩舎指数≧0）に該当する場合のみ適用する
-      // （entries.htmlのstableYellow/kytGradeと同じゲート。厩舎の総合グレードを無条件に全馬へ適用しない）
+      // 厩指穴信頼グレードS〜Bトリガー
+      // 2026-09-27、無効化。ホールドアウト検証でグレード順序自体が崩壊（Bグレードの実測がC/D/Eより
+      // 低い）と既に判明済みだったにもかかわらずトリガーが生きたままだった。entries.html側は
+      // 同日「穴妙味指数」に置き換え済み。変数・APIフィールドは残置。
       const inKyushaSegment = odds !== null && odds >= 15 && kyushaIndex !== null && kyushaIndex >= 0;
       const kyushaGrade = inKyushaSegment ? (gradeMap[r.trainer_code] ?? null) : null;
-      // グレードは複勝回収率帯そのもの（S≥130/A≥110/B≥100/C≥90…）のため、複勝回収率100%以上はS/A/Bのみ
-      const matchKyusha = kyushaGrade !== null && ['S', 'A', 'B'].includes(kyushaGrade);
+      const matchKyusha = false;
 
-      // ブリンカー指数グレードA（entries.htmlのblinkerBgと同じゲート: 初装着/再装着のみ対象）
-      const blinkerType = String(r.blinker ?? '').trim();
-      const blinkerGrade = String(r.blinker_grade ?? '').trim();
-      const matchBlinker = (blinkerType === '1' || blinkerType === '2') && blinkerGrade === 'A';
-
-      // ── 複勝回収率100%超シグナル（sc≥3 × 基準オッズ15〜30倍）───────────────
-      // 出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md（entries.htmlと同一ロジック）
+      // ── 複勝妙味シグナル（複勝sc≥3 × 基準オッズ15〜30倍）───────────────
+      // 2026-10-04: 旧称「複勝回収率100%超シグナル」。先読みなしの検証で100%超は成り立たなかったため改称し、EX指数のしきい値を新方式の指数に合わせて 15/50→35/125 に変更（本命指数 10/30 は据え置き）。根拠: python/research/fukusho100_threshold_wf.py、document/指数/複勝妙味シグナル_仕様書.md
+      // entries.html と同一ロジック・しきい値（変数名・APIフィールド名 match_fukusho100 は互換のため据え置き）
       const exOverall = r.ex_overall === null ? null : Number(r.ex_overall);
       const honmeiOverall = r.honmei_overall === null ? null : Number(r.honmei_overall);
       const comboRr = r.combo_place_rr === null ? null : Number(r.combo_place_rr);
@@ -1751,8 +1982,8 @@ app.get('/api/watchlist', async (req, res) => {
       const johoRank = (!isNaN(johoRaw) && johoRaw !== 0 && johoRaw !== -1)
         ? (johoRankLookup.get(raceKey)?.get(johoRaw) ?? null) : null;
 
-      const scIdx = ((exOverall !== null && exOverall >= 15) || (honmeiOverall !== null && honmeiOverall >= 10)) ? 1 : 0;
-      const scIdxStrong = ((exOverall !== null && exOverall >= 50) || (honmeiOverall !== null && honmeiOverall >= 30)) ? 1 : 0;
+      const scIdx = ((exOverall !== null && exOverall >= 35) || (honmeiOverall !== null && honmeiOverall >= 10)) ? 1 : 0;
+      const scIdxStrong = ((exOverall !== null && exOverall >= 125) || (honmeiOverall !== null && honmeiOverall >= 30)) ? 1 : 0;
       const scCombo = (comboN >= 30 && comboRr !== null && comboRr >= 100) ? 1 : 0;
       const scChokyo = (oiIdx >= 70 || shiageIdx >= 70) ? 1 : 0;
       const scGoal = (!isNaN(goalJuni) && (goalJuni === 1 || goalJuni === 2)) ? 1 : 0;
@@ -1761,12 +1992,26 @@ app.get('/api/watchlist', async (req, res) => {
       const fukushoSc = scIdx + scIdxStrong + scCombo + scChokyo + scGoal + scJoho + scTa;
       const matchFukusho100 = fukushoSc >= 3 && odds !== null && odds >= 15 && odds < 30;
 
-      // 注目馬複合シグナル(sc≥6): walk-forward検証で学習期間・2024・2025・2026の4期間すべて単勝回収率100%超を確認済み
-      // 出典: document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md 第5章
+      // 注目馬複合シグナル(sc≥6)トリガー
+      // 2026-10-04、無効化（ユーザー判断）。旧根拠「4期間すべて単勝100%超」は EX指数・本命指数が全期間集計
+      // （先読みあり）のままの検証だった。先読みをすべて除き毎年直前年まで集計し直した検証では sc≥6 の単勝は
+      // 同オッズ帯平均と同じ（76.5% vs 76.5%）。scの値自体は「注目sc」列の表示用に引き続き返す。
+      // 詳細: document/指数/sc_注目馬複合シグナル_仕様書.md
       const notableSc = notableScByKey.get(`${raceKey}_${r.uma_num}`) ?? 0;
-      const matchNotable = notableSc >= 6;
+      const matchNotable = false;
 
-      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100 && !matchBlinker && !matchNotable) return null;
+      // sc上位（sc≥9）トリガー: 2026-10-05 追加（ユーザー判断）。sc は出馬表の列#8・推奨買い目と同じ値。
+      // 先読みなしの検証（2022〜2026、新馬除外）で複勝91.8%（年別 97/90/90/91/90%）、同じオッズ帯の平均+13.9pt、
+      // 単勝101.5%（払戻上位1%除外で79.5%＝高配当頼み）。年513頭・1開催日約5頭。根拠: document/指数/sc_注目馬複合シグナル_仕様書.md
+      const matchScTop = notableSc >= SC_TOP_MIN;
+
+      // 穴妙味指数A/B（entries.htmlのanabaMyomiGrade()と同一ロジック）
+      // 2026-10-05、ユーザー判断で廃止（false固定）。先読みを除くと A 単勝82.5% / B 73.1% で同オッズ帯平均（77.4%）並み。
+      // 変数・APIフィールドは残置。詳細: document/指数/【廃】穴妙味指数_仕様書.md
+      const myomiGrade = anabaMyomiGrade(ex ?? NaN, r.in_idm, odds ?? NaN);
+      const matchMyomi = false;
+
+      if (!matchHonmei && !matchEx && !matchKyusha && !matchFukusho100 && !matchNotable && !matchMyomi && !matchScTop) return null;
 
       return {
         course_code: r.course_code, year_code: r.year_code, kai: r.kai, day_code: r.day_code, race_num: r.race_num,
@@ -1777,9 +2022,9 @@ app.get('/api/watchlist', async (req, res) => {
         kijun_odds: r.kijun_odds, kijun_ninki: r.kijun_ninki,
         ex_course: ex, honmei_course: honmei, kyusha_grade: kyushaGrade,
         match_honmei: matchHonmei, match_ex: matchEx, match_kyusha: matchKyusha,
-        match_fukusho100: matchFukusho100, fukusho_sc: matchFukusho100 ? fukushoSc : null,
-        match_blinker: matchBlinker, blinker_type: blinkerType, blinker_grade: blinkerGrade,
-        match_notable: matchNotable, notable_sc: matchNotable ? notableSc : null,
+        match_fukusho100: matchFukusho100, fukusho_sc: fukushoSc,
+        match_notable: matchNotable, notable_sc: notableSc, match_sc_top: matchScTop,
+        match_myomi: matchMyomi, myomi_grade: myomiGrade,
         order_of_finish: r.order_of_finish, win_pay: r.win_pay, place_pay: r.place_pay, ijou_kubun: r.ijou_kubun,
       };
     })
@@ -1924,6 +2169,91 @@ app.post('/api/honmei-etl', (req, res) => {
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();
     } finally {
+      etlLocks.honmei = false;
+    }
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// EX指数・本命指数 まとめ更新: POST /api/anaba-honmei-etl
+// 2026-09-27追加。両方とも推奨買い目・穴妙味指数(entries.html列#25)が日々内部参照するため、
+// 個別更新を忘れると新しいレース日のスコアが丸ごと欠落する事故が発生した（同日発覚）。
+// 個別に更新する必要のあるケースが実運用上ないため、1ボタンで両方を順に実行する形にまとめた。
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/api/anaba-honmei-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.anaba || etlLocks.honmei) {
+    send('エラー: EX指数・本命指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.anaba = true;
+  etlLocks.honmei = true;
+
+  const runOne = async (
+    label: string, sqlFile: string, partLabels: Record<number, string>, countTable: string
+  ): Promise<boolean> => {
+    if (!fs.existsSync(sqlFile)) {
+      send(`エラー: ${sqlFile} が見つかりません`, { error: true, done: true });
+      res.end(); return false;
+    }
+    send(`=== ${label} 開始 ===`);
+    const sql = fs.readFileSync(sqlFile, 'utf-8');
+    const parts = splitSqlByParts(sql);
+
+    for (let i = 0; i < parts.length; i++) {
+      const partNum = i + 1;
+      const partLabel = partLabels[partNum] ?? `Part${partNum}`;
+      send(`[${label} Part${partNum}] ${partLabel} 開始...`);
+
+      // 2026-09-27追加: 全パートで10秒毎にハートビートを送る。
+      // Part2以降、無音のまま数十秒〜数分続くSSEストリームが、この環境のプロキシ/ポート
+      // フォワーディングのアイドルタイムアウトに巻き込まれてサーバーごと再起動される事故が
+      // 複数回連続で再現したため（Part4のみハートビートがあったのが原因）。
+      let elapsed = 0;
+      const heartbeat = setInterval(() => {
+        elapsed += 10;
+        send(`[${label} Part${partNum}] 実行中... (${elapsed}秒経過)`);
+      }, 10_000);
+
+      try {
+        await runMysqlSql(parts[i]);
+        clearInterval(heartbeat);
+        send(`[${label} Part${partNum}] ${partLabel} 完了`);
+      } catch (err: any) {
+        clearInterval(heartbeat);
+        send(`[${label} Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
+        res.end(); return false;
+      }
+    }
+
+    try {
+      const [[row]] = await pool.query<any>(`SELECT COUNT(*) AS cnt FROM ${countTable}`);
+      send(`${label} 完了: ${countTable} ${Number(row.cnt).toLocaleString()} 件`);
+    } catch { /* 無視 */ }
+    return true;
+  };
+
+  (async () => {
+    try {
+      const okAnaba = await runOne('EX指数', ANABA_SQL_FILE, PART_LABELS, 'T_ANABA_SCORE');
+      if (!okAnaba) return;
+      const okHonmei = await runOne('本命指数', HONMEI_SQL_FILE, HONMEI_PART_LABELS, 'T_HONMEI_SCORE');
+      if (!okHonmei) return;
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.anaba = false;
       etlLocks.honmei = false;
     }
   })().catch((err) => {
@@ -2177,100 +2507,6 @@ app.post('/api/course-recovery-etl', (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// ブリンカー指数 ETL: POST /api/blinker-etl
-// blinker_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
-// 設計: document/指数/ブリンカー指数_仕様書.md
-// ────────────────────────────────────────────────────────────────────────────
-app.post('/api/blinker-etl', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const send = (msg: string, extra?: object) =>
-    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
-
-  if (etlLocks.blinker) {
-    send('エラー: ブリンカー指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
-    res.end(); return;
-  }
-  etlLocks.blinker = true;
-
-  (async () => {
-    try {
-      if (!fs.existsSync(BLINKER_SQL_FILE)) {
-        send('エラー: sql/blinker_index.sql が見つかりません', { error: true, done: true });
-        res.end(); return;
-      }
-      const sql = fs.readFileSync(BLINKER_SQL_FILE, 'utf-8');
-      const parts = splitSqlByParts(sql);
-
-      for (let i = 0; i < parts.length; i++) {
-        const partNum = i + 1;
-        const label = BLINKER_PART_LABELS[partNum] ?? `Part${partNum}`;
-        send(`[Part${partNum}] ${label} 開始...`);
-
-        let heartbeat: NodeJS.Timeout | undefined;
-        if (partNum >= 2) {
-          let elapsed = 0;
-          heartbeat = setInterval(() => {
-            elapsed += 15;
-            send(`[Part${partNum}] 処理中... (${elapsed}秒経過)`);
-          }, 15_000);
-        }
-
-        try {
-          await runMysqlSql(parts[i]);
-          if (heartbeat) clearInterval(heartbeat);
-          send(`[Part${partNum}] ${label} 完了`);
-        } catch (err: any) {
-          if (heartbeat) clearInterval(heartbeat);
-          send(`[Part${partNum}] エラー: ${err.message}`, { error: true, done: true });
-          res.end(); return;
-        }
-      }
-
-      try {
-        const [[row]] = await pool.query<any>(
-          'SELECT COUNT(*) AS cnt FROM T_BLINKER_SCORE'
-        );
-        send(`完了: T_BLINKER_SCORE ${Number(row.cnt).toLocaleString()} 件`);
-      } catch { /* 無視 */ }
-
-      // カバレッジ整合性チェック: blinker IN ('1','2') な馬でスコアが漏れていないか
-      // （過去に「スコア計算がT_SEDに依存し、未実施レースの馬が漏れる」バグが発生したため、
-      //   ETL実行のたびに必ず自動検出する。0件でなければ画面上に赤字で警告を出す）
-      try {
-        const [[gapRow]] = await pool.query<any>(
-          `SELECT COUNT(*) AS gap
-           FROM T_KYI k
-           INNER JOIN T_BAC b
-             ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
-           LEFT JOIN T_BLINKER_SCORE bls
-             ON  bls.course_code=k.course_code AND bls.year_code=k.year_code AND bls.kai=k.kai
-             AND bls.day_code=k.day_code AND bls.race_num=k.race_num AND bls.uma_num=k.uma_num
-           WHERE k.blinker IN ('1','2') AND b.tds_code IN ('1','2') AND b.class <> 'A1' AND bls.grade IS NULL`
-        );
-        const gap = Number(gapRow.gap);
-        if (gap > 0) {
-          send(`⚠ カバレッジ異常: blinker指定馬のうちスコア未計算が ${gap.toLocaleString()} 件あります（本来は0件のはず。sql/blinker_index.sql のPart3を確認してください）`, { error: true });
-        } else {
-          send('カバレッジチェックOK: スコア未計算の漏れなし');
-        }
-      } catch { /* 無視 */ }
-
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    } finally {
-      etlLocks.blinker = false;
-    }
-  })().catch((err) => {
-    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
-    res.end();
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
 // 不利巻き返し指数 ETL: POST /api/furi-etl
 // furi_index.sql を3パートに分割して順次実行。SSEで進捗を返す。
 // 設計: メモリ project_furi_index / project_prev_furi_recovery_analysis
@@ -2370,7 +2606,7 @@ app.post('/api/furi-etl', (req, res) => {
 // 他の指数と異なり馬ごとのスコアテーブルは持たず、T_KYUSHA_FACTOR_AGG（調教師別集計）を
 // getTrainerGradeMap()・computeFactorRecovery()がクエリ時にS〜F判定するため、
 // 完了後はその2つのメモリキャッシュをクリアしてグレードを即時反映させる。
-// 設計: document/指数/厩指穴信頼_仕様書.md
+// 設計: document/指数/【廃】厩指穴信頼_仕様書.md
 // ────────────────────────────────────────────────────────────────────────────
 app.post('/api/kyusha-etl', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -2442,6 +2678,158 @@ app.post('/api/kyusha-etl', (req, res) => {
     }
   })().catch((err) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// sc・複勝妙味の元データ ETL: POST /api/sc-base-etl
+// 2026-10-04 新設。sc（注目馬複合シグナル）と複勝妙味シグナルは出馬表・ウォッチリストを開いたときに
+// その場で計算するため専用のスコアテーブルは無いが、次の2つの集計を元データとして参照する:
+//   1. 騎手×調教師の成績 T_COMBO_RECOVERY（sql/combo_recovery.sql。以前は作成スクリプトが無く2026-04-30から未更新だった）
+//   2. 厩舎の穴馬成績 T_KYUSHA_FACTOR_AGG（sql/kyusha_analysis.sql。旧「厩指穴信頼」ETL。ボタンが非表示になっていた）
+// 2026-10-05 追加: 3. 厩舎穴指数の区分表 T_KYUSHA_NINKI_AGG（sql/kyusha_ninki_index.sql。出馬表 列#25）
+// 成績（T_SED）を取り込んだあとに実行する。
+// ────────────────────────────────────────────────────────────────────────────
+const COMBO_SQL_FILE = path.join(__dirname, '..', 'sql', 'combo_recovery.sql');
+const KYUSHA_NINKI_SQL_FILE = path.join(__dirname, '..', 'sql', 'kyusha_ninki_index.sql');
+etlLocks.scBase = false;
+
+app.post('/api/sc-base-etl', (_req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.scBase || etlLocks.kyusha) {
+    send('エラー: sc・複勝妙味の元データETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.scBase = true;
+  etlLocks.kyusha = true;
+
+  // 無音のまま数十秒続くと接続が切られることがあるため、10秒ごとに経過を送る（anaba-honmei-etl と同じ対策）
+  const runWithHeartbeat = async (label: string, sql: string) => {
+    let elapsed = 0;
+    const hb = setInterval(() => { elapsed += 10; send(`[${label}] 実行中... (${elapsed}秒経過)`); }, 10_000);
+    try { await runMysqlSql(sql); } finally { clearInterval(hb); }
+  };
+
+  (async () => {
+    try {
+      for (const f of [COMBO_SQL_FILE, KYUSHA_SQL_FILE, KYUSHA_NINKI_SQL_FILE]) {
+        if (!fs.existsSync(f)) { send(`エラー: ${f} が見つかりません`, { error: true, done: true }); res.end(); return; }
+      }
+      send('[1/3] 騎手×調教師の成績（T_COMBO_RECOVERY）を再集計 開始...');
+      try {
+        await runWithHeartbeat('1/3 騎手×調教師', fs.readFileSync(COMBO_SQL_FILE, 'utf-8'));
+      } catch (err: any) {
+        send(`[1/3] エラー: ${err.message}`, { error: true, done: true }); res.end(); return;
+      }
+      const [[c]] = await pool.query<any>('SELECT COUNT(*) AS pairs, SUM(total_count) AS total FROM T_COMBO_RECOVERY');
+      const [[t]] = await pool.query<any>(
+        `SELECT COUNT(*) AS cnt FROM T_KYI k
+           INNER JOIN T_BAC b ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+           INNER JOIN T_SED s ON s.course_code=k.course_code AND s.year_code=k.year_code AND s.kai=k.kai AND s.day_code=k.day_code AND s.race_num=k.race_num AND s.umaban=k.uma_num
+         WHERE TRIM(b.tds_code) IN ('1','2') AND TRIM(s.order_of_finish) <> '' AND CAST(TRIM(s.order_of_finish) AS UNSIGNED) > 0
+           AND TRIM(k.kishu_code) <> '' AND TRIM(k.trainer_code) <> ''`);
+      const gap = Number(t.cnt) - Number(c.total);
+      send(`[1/3] 完了: 騎手×調教師 ${Number(c.pairs).toLocaleString()} 組、合計 ${Number(c.total).toLocaleString()} 頭`
+        + (gap === 0 ? '（対象頭数と一致）' : ` ⚠ 対象頭数との差 ${gap.toLocaleString()} 頭`), gap === 0 ? undefined : { error: true });
+
+      const parts = splitSqlByParts(fs.readFileSync(KYUSHA_SQL_FILE, 'utf-8'));
+      for (let i = 0; i < parts.length; i++) {
+        const label = `2/3 厩舎の穴馬成績 Part${i + 1}`;
+        send(`[${label}] ${KYUSHA_PART_LABELS[i + 1] ?? ''} 開始...`);
+        try {
+          await runWithHeartbeat(label, parts[i]);
+        } catch (err: any) {
+          send(`[${label}] エラー: ${err.message}`, { error: true, done: true }); res.end(); return;
+        }
+        send(`[${label}] 完了`);
+      }
+      const [[k]] = await pool.query<any>('SELECT COUNT(*) AS cnt FROM T_KYUSHA_FACTOR_AGG');
+      send(`[2/3] 完了: T_KYUSHA_FACTOR_AGG ${Number(k.cnt).toLocaleString()} 件`);
+
+      send('[3/3] 厩舎穴指数の区分表（T_KYUSHA_NINKI_AGG）を再集計 開始...');
+      try {
+        await runWithHeartbeat('3/3 厩舎穴指数', fs.readFileSync(KYUSHA_NINKI_SQL_FILE, 'utf-8'));
+      } catch (err: any) {
+        send(`[3/3] エラー: ${err.message}`, { error: true, done: true }); res.end(); return;
+      }
+      const [[kn]] = await pool.query<any>('SELECT COUNT(*) AS cells, SUM(total_count) AS total, MAX(to_ymd) AS to_ymd FROM T_KYUSHA_NINKI_AGG');
+      send(`[3/3] 完了: 厩舎穴指数 ${kn.cells} 区分、${Number(kn.total).toLocaleString()} 頭（成績は ${kn.to_ymd} まで）`
+        + (Number(kn.cells) === 16 ? '' : ' ⚠ 区分数が16ではありません'), Number(kn.cells) === 16 ? undefined : { error: true });
+
+      trainerGradeCache = null;
+      factorRecoveryCache = null;
+      send('完了: キャッシュをクリアしました。出馬表・ウォッチリストを開き直すと新しい集計で sc・複勝妙味・厩舎穴指数が表示されます');
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } finally {
+      etlLocks.scBase = false;
+      etlLocks.kyusha = false;
+    }
+  })().catch((err) => {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 期待値指数 ETL: POST /api/ev-index-etl
+// python/ev_index_etl.py を実行し、進捗をSSEで返す。
+// ────────────────────────────────────────────────────────────────────────────
+const EV_INDEX_PY_SCRIPT = path.join(__dirname, '..', 'python', 'ev_index_etl.py');
+const PYTHON_EXE = process.env.PYTHON_EXE
+  ?? 'C:\\Users\\roykh\\AppData\\Local\\Programs\\Python\\Python312\\python.exe';
+
+app.post('/api/ev-index-etl', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (msg: string, extra?: object) =>
+    res.write(`data: ${JSON.stringify({ message: msg, ...extra })}\n\n`);
+
+  if (etlLocks.evIndex) {
+    send('エラー: 期待値指数ETLは既に実行中です。完了までお待ちください', { error: true, done: true });
+    res.end(); return;
+  }
+  if (!fs.existsSync(EV_INDEX_PY_SCRIPT)) {
+    send('エラー: python/ev_index_etl.py が見つかりません', { error: true, done: true });
+    res.end(); return;
+  }
+  etlLocks.evIndex = true;
+
+  const proc = spawn(PYTHON_EXE, [EV_INDEX_PY_SCRIPT], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let buf = '';
+  const flushLines = (chunk: Buffer, isErr: boolean) => {
+    buf += chunk.toString('utf-8');
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim()) send(isErr ? `[stderr] ${line}` : line);
+    }
+  };
+  proc.stdout.on('data', (d: Buffer) => flushLines(d, false));
+  proc.stderr.on('data', (d: Buffer) => flushLines(d, true));
+  proc.on('close', (code) => {
+    etlLocks.evIndex = false;
+    if (code === 0) {
+      send('期待値指数ETLが完了しました', { done: true });
+    } else {
+      send(`エラー: Pythonプロセスが異常終了しました (code=${code})`, { error: true, done: true });
+    }
+    res.end();
+  });
+  proc.on('error', (err) => {
+    etlLocks.evIndex = false;
+    send(`エラー: Pythonプロセスの起動に失敗しました: ${err.message}`, { error: true, done: true });
     res.end();
   });
 });

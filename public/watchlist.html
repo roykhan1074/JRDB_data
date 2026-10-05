@@ -28,41 +28,27 @@
     .cond-legend span { display: inline-flex; align-items: center; gap: 5px; }
 
     .tag { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: .68rem; font-weight: 700; color: #fff; margin: 1px 2px 1px 0; }
-    .tag-honmei { background: #db2777; }
-    .tag-ex     { background: #dc2626; }
-    .tag-kyusha { background: #0891b2; }
     .tag-fukusho100 { background: #ca8a04; cursor: help; }
-    .tag-blinker { background: #ec4899; cursor: help; }
-    .tag-notable { background: #7c3aed; cursor: help; }
+    .tag-sctop { background: #7c3aed; cursor: help; }   /* 旧「複合注目」タグの色を流用 */
 
     .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 14px; }
     .race-head { font-size: .9rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .race-head .sub { font-size: .76rem; color: #888; font-weight: 400; }
 
     .table-wrap { overflow-x: auto; }
-    table.wl-table { table-layout: fixed; width: 970px; border-collapse: collapse; font-size: .82rem; }
+    table.wl-table { table-layout: fixed; width: 836px; border-collapse: collapse; font-size: .82rem; }
     table.wl-table th { text-align: center; font-size: .72rem; color: #888; padding: 5px 6px; border-bottom: 1px solid #eee; white-space: nowrap; overflow: hidden; }
     table.wl-table th.hdr-nowrap { white-space: nowrap; word-break: normal; }
     table.wl-table td { text-align: center; padding: 6px 6px; border-bottom: 1px solid #f5f5f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     table.wl-table td.left { text-align: left; }
     table.wl-table tr:last-child td { border-bottom: none; }
 
-    /* 複勝回収率100%超シグナル行ハイライト（entries.htmlと同一配色）
-       出典: document/分析レポート/複勝回収率100%超_統合理論レポート.md */
+    /* 複勝妙味シグナル行ハイライト（entries.htmlと同一配色）
+       2026-10-04: 旧称「複勝回収率100%超シグナル」。先読みなしの検証で100%超は成り立たなかったため改称し、EX指数のしきい値を新方式の指数に合わせて 15/50→35/125 に変更（本命指数 10/30 は据え置き）。根拠: python/research/fukusho100_threshold_wf.py、document/指数/複勝妙味シグナル_仕様書.md */
     table.wl-table tr.fukusho-signal { background: #fbcfe8; }
     table.wl-table tr.fukusho-signal td:first-child {
       box-shadow: inset 3px 0 0 #dc2626;
     }
-
-    .kyt-badge {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 22px; height: 20px; border-radius: 4px; padding: 0 5px;
-      font-weight: 700; font-size: .74rem;
-    }
-    .kyt-s { background: #dc2626; color: #fff; }
-    .kyt-a { background: #fbcfe8; }
-    .kyt-b { background: #f97316; color: #fff; }
-    .kyt-c { background: #fef9c3; }
 
     .result-1st { color:#dc2626; font-weight:700; }
     .result-2nd { color:#2563eb; font-weight:700; }
@@ -89,13 +75,20 @@
   <div class="page-title">条件該当馬ウォッチリスト</div>
   <div class="page-sub">指定した開催日について、以下いずれかの条件に該当する馬を抽出します。</div>
 
+  <!-- 2026-09-27、本命・EX・厩信頼・B指数Aの4条件を無効化（src/server.tsでmatch_honmei/match_ex/
+       match_kyusha/match_blinkerを常にfalse固定）したため凡例からも削除。
+       本命はwalk-forward検証（学習2020-2023/検証2024-2026）で単勝回収率75.4%→76.9%→81.7%と
+       3年間すべて100%を大きく下回ると判明。EX・厩信頼はholdout検証でグレード順序崩壊・回収率崩壊が
+       判明したにもかかわらずトリガーが生きたまま放置されていた（過去にEXトリガーで実損失が出た事故と
+       同型）。B指数Aはブリンカー指数A/Cグレードがwalk-forward検証で無効と判明したため
+       （2026-10-05、ブリンカー指数自体を廃止し match_blinker もAPIから削除）。
+       2026-10-04、複合注目(sc≥6)も無効化して凡例から削除（先読みを全て除いた検証で単勝に効果なしと判明。
+       document/指数/sc_注目馬複合シグナル_仕様書.md）。
+       2026-10-05、穴妙味A/Bも廃止。同日のウォッチリスト整理で、無効条件のタグ・CSSを削除し、
+       「sc上位」（sc≥9）を追加。「複勝sc」「注目sc」の2列は出馬表の列#8と同じ「sc」1列（同じ色）に統合した。 -->
   <div class="cond-legend">
-    <span><span class="tag tag-honmei">本命</span>一番人気以外×本命指数(コース)≧50</span>
-    <span><span class="tag tag-ex">EX</span>EX指数(コース)≧100（複勝回収率100%超の帯）</span>
-    <span><span class="tag tag-kyusha">厩信頼</span>厩指穴信頼ランク S〜B（複勝回収率100%以上）</span>
-    <span><span class="tag tag-fukusho100">複勝100</span>sc≥3×基準オッズ15〜30倍（複勝回収率100.7%・的中率20.0%、n=3,523で検証済み）</span>
-    <span><span class="tag tag-blinker">B指数A</span>ブリンカー初装着/再装着×ブリンカー指数グレードA</span>
-    <span><span class="tag tag-notable">複合注目</span>注目馬複合シグナルsc≥6（単勝回収率、walk-forward検証で4期間すべて100%超）</span>
+    <span><span class="tag tag-fukusho100">複勝妙味</span>複勝sc≥3×基準オッズ15〜30倍（先読みなしの検証で複勝回収率96.1%・同じオッズ帯の平均+20.2pt・3着内率19.2%）</span>
+    <span><span class="tag tag-sctop">sc上位</span>sc≥9（出馬表のscと同じ値。先読みなしの検証で複勝回収率91.8%・年別90〜97%・同じオッズ帯の平均+13.9pt。単勝101.5%は高配当頼み）</span>
   </div>
 
   <div class="search-card">
@@ -132,17 +125,19 @@ function payCell(v) {
   return `<span class="pay-hit">${n.toLocaleString()}円</span>`;
 }
 
-function isHonmei(r) { const o = parseFloat(r.kijun_odds); return !isNaN(o) && o > 0 && o < 10; }
-function isAnaba(r)  { const o = parseFloat(r.kijun_odds); return !isNaN(o) && o >= 10; }
+// sc セルの色: entries.html の scBg() と同一（7以上=ピンク / 6=黄 / 1〜5=無色 / 0以下=グレー）
+function scBg(sc) {
+  if (sc === undefined || sc === null || isNaN(sc)) return '';
+  if (sc >= 7) return ' style="background:#fbcfe8"';
+  if (sc >= 6) return ' style="background:#fef9c3"';
+  if (sc >= 1) return '';
+  return ' style="background:#e5e7eb"';
+}
 
 function tagsHtml(r) {
   const tags = [];
-  if (r.match_honmei) tags.push('<span class="tag tag-honmei">本命</span>');
-  if (r.match_ex) tags.push('<span class="tag tag-ex">EX</span>');
-  if (r.match_kyusha) tags.push('<span class="tag tag-kyusha">厩信頼</span>');
-  if (r.match_fukusho100) tags.push(`<span class="tag tag-fukusho100" title="複勝回収率100%超シグナル（sc=${r.fukusho_sc}点×オッズ${Number(r.kijun_odds).toFixed(1)}倍）">複勝100</span>`);
-  if (r.match_blinker) tags.push(`<span class="tag tag-blinker" title="${r.blinker_type === '1' ? '初装着' : '再装着'}・ブリンカー指数グレードA">B指数A</span>`);
-  if (r.match_notable) tags.push(`<span class="tag tag-notable" title="注目馬複合シグナル sc=${r.notable_sc}点（sc≥6は単勝回収率101〜114%、walk-forward検証済み）">複合注目</span>`);
+  if (r.match_fukusho100) tags.push(`<span class="tag tag-fukusho100" title="複勝妙味シグナル（複勝sc=${r.fukusho_sc}点×オッズ${Number(r.kijun_odds).toFixed(1)}倍）">複勝妙味</span>`);
+  if (r.match_sc_top) tags.push(`<span class="tag tag-sctop" title="sc上位（sc=${r.notable_sc}点、sc≥9）">sc上位</span>`);
   return tags.join('');
 }
 
@@ -183,32 +178,33 @@ function render(data) {
     races.get(key).push(r);
   }
 
-  let hitCount = 0, totalWithResult = 0, winSum = 0, placeSum = 0;
-  for (const r of rows) {
-    if (r.order_of_finish) {
-      totalWithResult++;
-      const win = parseInt(r.win_pay) || 0;
-      const place = parseInt(r.place_pay) || 0;
-      winSum += win;
-      placeSum += place;
-      if (win > 0) hitCount++;
-    }
-  }
   // 回収率(%) = 払戻合計 ÷ (結果判明済み件数×100円) × 100 = 払戻合計 ÷ 結果判明済み件数
-  const winRecovery   = totalWithResult > 0 ? (winSum   / totalWithResult).toFixed(1) : null;
-  const placeRecovery = totalWithResult > 0 ? (placeSum / totalWithResult).toFixed(1) : null;
-
-  const summaryHtml = totalWithResult > 0
-    ? `<div class="summary-bar">
-         <span>該当馬数: <b>${rows.length}</b></span>
-         <span>結果判明済み: <b>${totalWithResult}</b></span>
-         <span>単勝的中: <b>${hitCount}</b></span>
-         <span>単勝合計: <b>${winSum.toLocaleString()}円</b></span>
-         <span>単勝回収率: <b>${winRecovery}%</b></span>
-         <span>複勝合計: <b>${placeSum.toLocaleString()}円</b></span>
-         <span>複勝回収率: <b>${placeRecovery}%</b></span>
-       </div>`
-    : `<div class="summary-bar"><span>該当馬数: <b>${rows.length}</b>（この開催日はまだ結果が出ていません）</span></div>`;
+  function summarize(list) {
+    let n = 0, winHit = 0, placeHit = 0, winSum = 0, placeSum = 0;
+    for (const r of list) {
+      if (!r.order_of_finish) continue;
+      n++;
+      const win = parseInt(r.win_pay) || 0, place = parseInt(r.place_pay) || 0;
+      winSum += win; placeSum += place;
+      if (win > 0) winHit++;
+      if (place > 0) placeHit++;
+    }
+    return { all: list.length, n, winHit, placeHit, winSum, placeSum,
+             winRr: n ? (winSum / n).toFixed(1) : null, placeRr: n ? (placeSum / n).toFixed(1) : null };
+  }
+  function summaryLine(label, list) {
+    const s = summarize(list);
+    if (!s.all) return '';
+    if (!s.n) return `<div class="summary-bar"><span><b>${label}</b> 該当 <b>${s.all}</b>頭（まだ結果が出ていません）</span></div>`;
+    return `<div class="summary-bar">
+         <span><b>${label}</b> 該当 <b>${s.all}</b>頭（結果判明 ${s.n}頭）</span>
+         <span>単勝 的中<b>${s.winHit}</b> 払戻<b>${s.winSum.toLocaleString()}円</b> 回収率<b>${s.winRr}%</b></span>
+         <span>複勝 的中<b>${s.placeHit}</b> 払戻<b>${s.placeSum.toLocaleString()}円</b> 回収率<b>${s.placeRr}%</b></span>
+       </div>`;
+  }
+  const summaryHtml = summaryLine('全体', rows)
+    + summaryLine('複勝妙味', rows.filter(r => r.match_fukusho100))
+    + summaryLine('sc上位', rows.filter(r => r.match_sc_top));
 
   const panelsHtml = Array.from(races.entries()).map(([key, horses]) => {
     const first = horses[0];
@@ -226,9 +222,7 @@ function render(data) {
         <td class="left">${r.trainer_name?.trim() || '—'}</td>
         <td>${r.kijun_odds ? Number(r.kijun_odds).toFixed(1) : '—'}</td>
         <td>${r.kijun_ninki ?? '—'}</td>
-        <td>${isHonmei(r) && r.honmei_course !== null ? r.honmei_course.toFixed(0) : '—'}</td>
-        <td>${isAnaba(r) && r.ex_course !== null ? r.ex_course.toFixed(0) : '—'}</td>
-        <td>${r.kyusha_grade ? `<span class="kyt-badge kyt-${r.kyusha_grade.toLowerCase()}">${r.kyusha_grade}</span>` : '—'}</td>
+        <td${scBg(r.notable_sc)}>${r.notable_sc ?? '—'}</td>
         <td>${orderCell(r)}</td>
         <td>${payCell(r.win_pay)}</td>
         <td>${payCell(r.place_pay)}</td>
@@ -246,13 +240,13 @@ function render(data) {
           <colgroup>
             <col style="width:40px"><col style="width:160px"><col style="width:130px">
             <col style="width:76px"><col style="width:76px"><col style="width:60px">
-            <col style="width:40px"><col style="width:70px"><col style="width:64px">
-            <col style="width:56px"><col style="width:46px"><col style="width:76px"><col style="width:76px">
+            <col style="width:40px"><col style="width:56px">
+            <col style="width:46px"><col style="width:76px"><col style="width:76px">
           </colgroup>
           <thead>
             <tr>
               <th class="hdr-nowrap">馬番</th><th class="hdr-nowrap">馬名</th><th class="hdr-nowrap">該当条件</th><th class="hdr-nowrap">騎手</th><th class="hdr-nowrap">調教師</th>
-              <th class="hdr-nowrap">オッズ</th><th class="hdr-nowrap">人気</th><th class="hdr-nowrap">本命指数</th><th class="hdr-nowrap">EX指数</th><th>厩指穴<br>信頼</th>
+              <th class="hdr-nowrap">オッズ</th><th class="hdr-nowrap">人気</th><th class="hdr-nowrap" title="sc（注目馬複合シグナル）。出馬表の列#8と同じ値・同じ色（7以上ピンク/6黄/0以下グレー）。9以上が「sc上位」">sc</th>
               <th class="hdr-nowrap">着順</th><th class="hdr-nowrap">単勝</th><th class="hdr-nowrap">複勝</th>
             </tr>
           </thead>

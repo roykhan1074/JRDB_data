@@ -2,7 +2,9 @@
 -- 本命指数 ETL
 -- 定義: kijun_odds > 0 AND kijun_odds < 10.0 の馬を本命サイドとする
 -- 実行順: Part1 → Part2 → Part3 → Part4
--- Part2〜4 は差分投入可（ON DUPLICATE KEY UPDATE で冪等）
+-- Part2 は差分投入可（ON DUPLICATE KEY UPDATE で冪等）。Part3/Part4 は別名テーブルで全件再構築→原子的RENAME。
+-- 2026-10-04 方式変更: ファクター効果を「同じ基準オッズ帯の平均複勝払戻を上回った分」で測り、
+--   縮小推定(k=300)・コース別細分化なし。詳細は document/指数/本命指数_仕様書.md
 -- ============================================================
 
 
@@ -183,6 +185,7 @@ CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_goal_c',        "DECIMAL(5,1
 CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_combo_c',       "DECIMAL(5,1) COMMENT '複合展開スコア(コース別)'");
 CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_kyakushitsu_c', "DECIMAL(5,1) COMMENT '脚質スコア(コース別)'");
 CALL sp_add_col_if_missing('T_HONMEI_SCORE', 'score_blood_c',       "DECIMAL(5,1) COMMENT '血統スコア(コース別)'");
+CALL sp_add_col_if_missing('T_HONMEI_FACTOR_AGG', 'excess_dev',    "DECIMAL(8,3) COMMENT '同オッズ帯平均複勝払戻との差の平均×n/(n+300)（2026-10-04新方式）'");
 
 DROP PROCEDURE IF EXISTS sp_add_col_if_missing;
 
@@ -264,820 +267,154 @@ ON DUPLICATE KEY UPDATE
 
 
 -- ============================================================
--- Part 3: T_HONMEI_FACTOR_AGG 集計
--- 成績が存在し正常完走したレコードのみ対象
--- 全体集計（course_code='' tds_code='' dist_band=''）と
--- コース別集計（course_code/tds_code/dist_band を指定）を両方投入する
--- ============================================================
-
--- ── ベースライン（全体・全本命の回収率）────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'baseline', 'all', '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)              / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3)  / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
--- ── コース別ベースライン ────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'baseline', 'all',
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-1. テン指数順位 ────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'ten_rank',
-  CASE
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(ten_index_juni) <> '' AND CAST(TRIM(ten_index_juni) AS UNSIGNED) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'ten_rank',
-  CASE
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(ten_index_juni) <> '' AND CAST(TRIM(ten_index_juni) AS UNSIGNED) > 0
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-2. 上がり指数順位 ──────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'agari_rank',
-  CASE
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(agari_index_juni) <> '' AND CAST(TRIM(agari_index_juni) AS UNSIGNED) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'agari_rank',
-  CASE
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(agari_index_juni) <> '' AND CAST(TRIM(agari_index_juni) AS UNSIGNED) > 0
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-3. 位置指数順位 ────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'ichi_rank',
-  CASE
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(ichi_index_juni) <> '' AND CAST(TRIM(ichi_index_juni) AS UNSIGNED) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'ichi_rank',
-  CASE
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(ichi_index_juni) <> '' AND CAST(TRIM(ichi_index_juni) AS UNSIGNED) > 0
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-4. ゴール順位 ──────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'goal_rank',
-  CASE
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(goal_juni) <> '' AND CAST(TRIM(goal_juni) AS UNSIGNED) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'goal_rank',
-  CASE
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~'
-  END AS factor_value,
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(goal_juni) <> '' AND CAST(TRIM(goal_juni) AS UNSIGNED) > 0
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-5. 複合展開パターン ────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'tenkai_combo',
-  CASE
-    WHEN is_dual_top   = 1 THEN 'dual_top'
-    WHEN is_sen_oki    = 1 THEN 'sen_oki'
-    WHEN is_hana_iki   = 1 THEN 'hana_iki'
-    WHEN is_mid_chaser = 1 THEN 'mid_chaser'
-    ELSE 'other'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'tenkai_combo',
-  CASE
-    WHEN is_dual_top   = 1 THEN 'dual_top'
-    WHEN is_sen_oki    = 1 THEN 'sen_oki'
-    WHEN is_hana_iki   = 1 THEN 'hana_iki'
-    WHEN is_mid_chaser = 1 THEN 'mid_chaser'
-    ELSE 'other'
-  END AS factor_value,
-  course_code, tds_code,
-  CASE
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~'
-  END AS dist_band,
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(distance) <> ''
-GROUP BY course_code, tds_code, dist_band, factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-6. IDM指数帯 ───────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'idm_band',
-  CASE
-    WHEN CAST(TRIM(idm) AS DECIMAL(6,1)) <  30 THEN '~30'
-    WHEN CAST(TRIM(idm) AS DECIMAL(6,1)) <  40 THEN '30~40'
-    WHEN CAST(TRIM(idm) AS DECIMAL(6,1)) <  50 THEN '40~50'
-    WHEN CAST(TRIM(idm) AS DECIMAL(6,1)) <  60 THEN '50~60'
-    WHEN CAST(TRIM(idm) AS DECIMAL(6,1)) <  70 THEN '60~70'
-    ELSE '70~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(idm) <> '' AND CAST(TRIM(idm) AS DECIMAL(6,1)) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-7. 情報指数帯（本命専用ファクター）────────────────────────────
--- -1 は非開示のため除外。情報指数が高いほど「情報的に注目」された本命。
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'joho_band',
-  CASE
-    WHEN CAST(TRIM(joho_index) AS DECIMAL(6,1)) <  30 THEN '~30'
-    WHEN CAST(TRIM(joho_index) AS DECIMAL(6,1)) <  50 THEN '30~50'
-    WHEN CAST(TRIM(joho_index) AS DECIMAL(6,1)) <  70 THEN '50~70'
-    ELSE '70~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(joho_index) <> ''
-  AND CAST(TRIM(joho_index) AS DECIMAL(6,1)) >= 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-8. 厩舎指数帯（本命専用ファクター）────────────────────────────
--- 仕上がり状態を示す厩舎指数。本命馬での効果を測定。
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'kyusha_band',
-  CASE
-    WHEN CAST(TRIM(kyusha_index) AS DECIMAL(6,1)) <  20 THEN '~20'
-    WHEN CAST(TRIM(kyusha_index) AS DECIMAL(6,1)) <  30 THEN '20~30'
-    WHEN CAST(TRIM(kyusha_index) AS DECIMAL(6,1)) <  40 THEN '30~40'
-    ELSE '40~'
-  END AS factor_value,
-  '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(kyusha_index) <> ''
-  AND CAST(TRIM(kyusha_index) AS DECIMAL(6,1)) > 0
-GROUP BY factor_value
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-9. 調教評価 ────────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'chokyo_hyoka', TRIM(chokyo_hyoka), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(chokyo_hyoka) <> ''
-GROUP BY TRIM(chokyo_hyoka)
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-10. 脚質 ───────────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'kyakushitsu', TRIM(kyakushitsu), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(kyakushitsu) <> ''
-GROUP BY TRIM(kyakushitsu)
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
--- ── 3-10b. 脚質（コース×芝ダ別）────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'kyakushitsu', TRIM(kyakushitsu), course_code, tds_code, '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(kyakushitsu) <> ''
-GROUP BY course_code, tds_code, TRIM(kyakushitsu)
-HAVING COUNT(*) >= 20
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-11. 上昇度 ─────────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'joshodo', TRIM(joshodo), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(joshodo) <> ''
-GROUP BY TRIM(joshodo)
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-12. 距離適性 ───────────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'kyori_tekisei', TRIM(kyori_tekisei), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(kyori_tekisei) <> ''
-GROUP BY TRIM(kyori_tekisei)
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-13. 父系統コード ───────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'chichi_keitou', TRIM(chichi_keitou_code), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(chichi_keitou_code) <> ''
-GROUP BY TRIM(chichi_keitou_code)
-HAVING COUNT(*) >= 30
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
--- ── 3-13b. 父系統（芝ダ別）──────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'chichi_keitou', TRIM(chichi_keitou_code), '', tds_code, '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(chichi_keitou_code) <> '' AND TRIM(tds_code) <> ''
-GROUP BY tds_code, TRIM(chichi_keitou_code)
-HAVING COUNT(*) >= 20
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ── 3-14. 母父系統コード ─────────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'hahachichi_keitou', TRIM(hahachichi_keitou_code), '', '', '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(hahachichi_keitou_code) <> ''
-GROUP BY TRIM(hahachichi_keitou_code)
-HAVING COUNT(*) >= 30
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
--- ── 3-14b. 母父系統（芝ダ別）────────────────────────────────────────
-INSERT INTO T_HONMEI_FACTOR_AGG
-  (factor_type, factor_value, course_code, tds_code, dist_band,
-   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
-   win_rate, place_rate, win_recovery, place_recovery)
-SELECT
-  'hahachichi_keitou', TRIM(hahachichi_keitou_code), '', tds_code, '',
-  COUNT(*),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1),
-  SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3),
-  SUM(win_payout), SUM(place_payout),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) = 1)             / COUNT(*) * 100, 1),
-  ROUND(SUM(CAST(TRIM(finish_order) AS UNSIGNED) BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
-  ROUND(SUM(win_payout)   / COUNT(*), 1),
-  ROUND(SUM(place_payout) / COUNT(*), 1)
-FROM T_HONMEI_RACE_LOG
-WHERE finish_order IS NOT NULL AND ijou_kubun IN ('0','')
-  AND TRIM(hahachichi_keitou_code) <> '' AND TRIM(tds_code) <> ''
-GROUP BY tds_code, TRIM(hahachichi_keitou_code)
-HAVING COUNT(*) >= 20
-ON DUPLICATE KEY UPDATE
-  total_count=VALUES(total_count), win_count=VALUES(win_count),
-  place_count=VALUES(place_count), win_payout_sum=VALUES(win_payout_sum),
-  place_payout_sum=VALUES(place_payout_sum), win_rate=VALUES(win_rate),
-  place_rate=VALUES(place_rate), win_recovery=VALUES(win_recovery),
-  place_recovery=VALUES(place_recovery);
-
-
--- ============================================================
--- Part 4: T_HONMEI_SCORE 計算
+-- Part 3: T_HONMEI_FACTOR_AGG 集計（2026-10-04 方式変更）
 --
--- 各ファクターの回収率偏差（factor_recovery - baseline_recovery）を合計して指数化。
--- 全体指数: baseline は course_code='' tds_code='' dist_band='' の 'baseline'/'all'
--- コース別指数: コース別 baseline が存在すれば使用し、なければ全体 baseline にフォールバック
+-- 【新方式】各ファクター値について「同じ基準オッズ帯の馬の平均複勝払戻を、どれだけ上回ったか」
+--   (excess) の平均を求め、サンプル数で縮小推定した値を excess_dev に保存する。
+--     excess  = 複勝払戻 − 同じオッズ帯(~1.5/1.5-2/2-2.5/2.5-3/3-4/4-5/5-7/7-10倍)の平均複勝払戻
+--     excess_dev = AVG(excess) × n / (n + 300)
+--   旧方式（単勝回収率の偏差・コース×芝ダ×距離帯の細分化）は walk-forward 検証で
+--   上位帯の複勝上乗せがほぼ無かったため廃止。根拠: python/research/honmei_improve_wf.py、
+--   document/指数/本命指数_仕様書.md。
+--   調教ファクターは旧方式で「集計=T_CYB.chokyo_hyoka／採点=T_KYI.chokyo_yajirushi」と
+--   別項目を照合していた不具合があったため、集計・採点とも chokyo_yajirushi に統一。
 --
--- 対象: T_KYI 全馬
---       指数が意味を持つのは kijun_odds < 10.0 の馬のみ（表示側でフィルタする）
--- 冪等: ON DUPLICATE KEY UPDATE
+-- 書き込みは別名テーブル(_NEW)で構築 → 原子的RENAME（CLAUDE.md「指数/スコアETL実装時の必須チェック」2番）
 -- ============================================================
-INSERT INTO T_HONMEI_SCORE (
+
+DROP TABLE IF EXISTS T_HONMEI_HM_WORK;
+CREATE TABLE T_HONMEI_HM_WORK AS
+SELECT
+  w.*,
+  w.place_payout - AVG(w.place_payout) OVER (PARTITION BY w.odds_band) AS excess
+FROM (
+  SELECT
+    CAST(TRIM(l.finish_order) AS UNSIGNED) AS fin,
+    l.win_payout, l.place_payout,
+    CASE
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 1.5 THEN '0-1.5'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 2   THEN '1.5-2'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 2.5 THEN '2-2.5'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 3   THEN '2.5-3'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 4   THEN '3-4'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 5   THEN '4-5'
+      WHEN CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 7   THEN '5-7'
+      ELSE '7-10'
+    END AS odds_band,
+    -- 順位系: 1 / 2~3 / 4~6 / 7~ / NA(空欄・0)
+    CASE WHEN CAST(TRIM(l.ten_index_juni) AS UNSIGNED) = 1 THEN '1'
+         WHEN CAST(TRIM(l.ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+         WHEN CAST(TRIM(l.ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+         WHEN CAST(TRIM(l.ten_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_ten,
+    CASE WHEN CAST(TRIM(l.agari_index_juni) AS UNSIGNED) = 1 THEN '1'
+         WHEN CAST(TRIM(l.agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+         WHEN CAST(TRIM(l.agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+         WHEN CAST(TRIM(l.agari_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_agari,
+    CASE WHEN CAST(TRIM(l.ichi_index_juni) AS UNSIGNED) = 1 THEN '1'
+         WHEN CAST(TRIM(l.ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+         WHEN CAST(TRIM(l.ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+         WHEN CAST(TRIM(l.ichi_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_ichi,
+    CASE WHEN CAST(TRIM(l.goal_juni) AS UNSIGNED) = 1 THEN '1'
+         WHEN CAST(TRIM(l.goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+         WHEN CAST(TRIM(l.goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+         WHEN CAST(TRIM(l.goal_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_goal,
+    CASE WHEN l.is_dual_top = 1 THEN 'dual_top' WHEN l.is_sen_oki = 1 THEN 'sen_oki'
+         WHEN l.is_hana_iki = 1 THEN 'hana_iki' WHEN l.is_mid_chaser = 1 THEN 'mid_chaser'
+         ELSE 'other' END AS fv_combo,
+    CASE WHEN TRIM(l.idm) = '' OR l.idm IS NULL OR CAST(TRIM(l.idm) AS DECIMAL(6,1)) <= 0 THEN 'NA'
+         WHEN CAST(TRIM(l.idm) AS DECIMAL(6,1)) < 30 THEN '~30'
+         WHEN CAST(TRIM(l.idm) AS DECIMAL(6,1)) < 40 THEN '30~40'
+         WHEN CAST(TRIM(l.idm) AS DECIMAL(6,1)) < 50 THEN '40~50'
+         WHEN CAST(TRIM(l.idm) AS DECIMAL(6,1)) < 60 THEN '50~60'
+         WHEN CAST(TRIM(l.idm) AS DECIMAL(6,1)) < 70 THEN '60~70' ELSE '70~' END AS fv_idm,
+    CASE WHEN l.joho_index IS NULL OR TRIM(l.joho_index) = '' OR CAST(TRIM(l.joho_index) AS DECIMAL(6,1)) < 0 THEN 'NA'
+         WHEN CAST(TRIM(l.joho_index) AS DECIMAL(6,1)) < 30 THEN '~30'
+         WHEN CAST(TRIM(l.joho_index) AS DECIMAL(6,1)) < 50 THEN '30~50'
+         WHEN CAST(TRIM(l.joho_index) AS DECIMAL(6,1)) < 70 THEN '50~70' ELSE '70~' END AS fv_joho,
+    CASE WHEN l.kyusha_index IS NULL OR TRIM(l.kyusha_index) = '' OR CAST(TRIM(l.kyusha_index) AS DECIMAL(6,1)) <= 0 THEN 'NA'
+         WHEN CAST(TRIM(l.kyusha_index) AS DECIMAL(6,1)) < 20 THEN '~20'
+         WHEN CAST(TRIM(l.kyusha_index) AS DECIMAL(6,1)) < 30 THEN '20~30'
+         WHEN CAST(TRIM(l.kyusha_index) AS DECIMAL(6,1)) < 40 THEN '30~40' ELSE '40~' END AS fv_kyu,
+    COALESCE(NULLIF(TRIM(k.chokyo_yajirushi), ''), 'NA')        AS fv_chk,
+    COALESCE(NULLIF(TRIM(l.kyakushitsu), ''), 'NA')             AS fv_kya,
+    COALESCE(NULLIF(TRIM(l.joshodo), ''), 'NA')                 AS fv_jos,
+    COALESCE(NULLIF(TRIM(l.kyori_tekisei), ''), 'NA')           AS fv_kyo,
+    COALESCE(NULLIF(TRIM(l.chichi_keitou_code), ''), 'NA')      AS fv_chi,
+    COALESCE(NULLIF(TRIM(l.hahachichi_keitou_code), ''), 'NA')  AS fv_hah
+  FROM T_HONMEI_RACE_LOG l
+  INNER JOIN T_KYI k
+    ON  k.course_code = l.course_code AND k.year_code = l.year_code AND k.kai = l.kai
+    AND k.day_code = l.day_code AND k.race_num = l.race_num AND k.uma_num = l.uma_num
+  WHERE l.finish_order IS NOT NULL AND l.ijou_kubun IN ('0','')
+    AND TRIM(k.kijun_odds) <> ''
+    AND CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) > 0
+    AND CAST(TRIM(k.kijun_odds) AS DECIMAL(6,1)) < 10
+) w;
+
+DROP TABLE IF EXISTS T_HONMEI_FACTOR_AGG_NEW;
+CREATE TABLE T_HONMEI_FACTOR_AGG_NEW LIKE T_HONMEI_FACTOR_AGG;
+
+INSERT INTO T_HONMEI_FACTOR_AGG_NEW
+  (factor_type, factor_value, course_code, tds_code, dist_band,
+   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
+   win_rate, place_rate, win_recovery, place_recovery, excess_dev)
+SELECT ft, fv, '', '', '',
+  COUNT(*), SUM(fin = 1), SUM(fin BETWEEN 1 AND 3), SUM(win_payout), SUM(place_payout),
+  ROUND(SUM(fin = 1) / COUNT(*) * 100, 1), ROUND(SUM(fin BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
+  ROUND(SUM(win_payout) / COUNT(*), 1), ROUND(SUM(place_payout) / COUNT(*), 1),
+  ROUND(AVG(excess) * COUNT(*) / (COUNT(*) + 300), 3)
+FROM (
+            SELECT 'ten_rank'          AS ft, fv_ten   AS fv, fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'agari_rank',             fv_agari,      fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'ichi_rank',              fv_ichi,       fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'goal_rank',              fv_goal,       fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'tenkai_combo',           fv_combo,      fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'idm_band',               fv_idm,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'joho_band',              fv_joho,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'kyusha_band',            fv_kyu,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'chokyo_yajirushi',       fv_chk,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'kyakushitsu',            fv_kya,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'joshodo',                fv_jos,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'kyori_tekisei',          fv_kyo,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'chichi_keitou',          fv_chi,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+  UNION ALL SELECT 'hahachichi_keitou',      fv_hah,        fin, win_payout, place_payout, excess FROM T_HONMEI_HM_WORK
+) u
+GROUP BY ft, fv;
+
+-- 参考用の全体ベースライン行（新方式のスコア計算には使わない。excess の全体平均は定義上0）
+INSERT INTO T_HONMEI_FACTOR_AGG_NEW
+  (factor_type, factor_value, course_code, tds_code, dist_band,
+   total_count, win_count, place_count, win_payout_sum, place_payout_sum,
+   win_rate, place_rate, win_recovery, place_recovery, excess_dev)
+SELECT 'baseline', 'all', '', '', '',
+  COUNT(*), SUM(fin = 1), SUM(fin BETWEEN 1 AND 3), SUM(win_payout), SUM(place_payout),
+  ROUND(SUM(fin = 1) / COUNT(*) * 100, 1), ROUND(SUM(fin BETWEEN 1 AND 3) / COUNT(*) * 100, 1),
+  ROUND(SUM(win_payout) / COUNT(*), 1), ROUND(SUM(place_payout) / COUNT(*), 1), 0
+FROM T_HONMEI_HM_WORK;
+
+DROP TABLE IF EXISTS T_HONMEI_FACTOR_AGG_OLD;
+RENAME TABLE T_HONMEI_FACTOR_AGG TO T_HONMEI_FACTOR_AGG_OLD, T_HONMEI_FACTOR_AGG_NEW TO T_HONMEI_FACTOR_AGG;
+DROP TABLE T_HONMEI_FACTOR_AGG_OLD;
+DROP TABLE IF EXISTS T_HONMEI_HM_WORK;
+
+
+-- ============================================================
+-- Part 4: T_HONMEI_SCORE 計算（2026-10-04 方式変更）
+--
+-- 生スコア(raw) = 14ファクターの excess_dev の合計（該当値が無いファクターは0）
+-- 表示スコア    = raw を旧本命指数と同じ目盛りに換算した値（折れ線換算）
+--   換算点: raw 0.19→0 / 2.61→10 / 6.56→30 / 9.73→50（両端は隣の区間の傾きで延長）
+--   換算点は「2024-2026年に旧本命指数がその値以上だった馬の割合」と新スコアで同じ割合になる値。
+--   これにより sc・推奨印の軸候補・分析画面等のしきい値（0/10/30/50）が「同じ割合の上位馬」を指す。
+-- overall_score と course_score は同じ値（新方式はコース別の細分化を行わない）。
+-- score_* 列は各ファクターの excess_dev（換算前の生の値）。合計は raw と一致し、表示スコアとは一致しない。
+-- 対象: T_KYI 全馬（芝ダ。結果テーブルには依存しない＝出走前レースにも付与される）
+-- 書き込みは別名テーブル(_NEW)で構築 → 原子的RENAME
+-- ============================================================
+DROP TABLE IF EXISTS T_HONMEI_SCORE_NEW;
+CREATE TABLE T_HONMEI_SCORE_NEW LIKE T_HONMEI_SCORE;
+
+INSERT INTO T_HONMEI_SCORE_NEW (
   course_code, year_code, kai, day_code, race_num, uma_num,
   overall_score, course_score,
   score_ten, score_agari, score_ichi, score_goal, score_combo,
@@ -1087,353 +424,118 @@ INSERT INTO T_HONMEI_SCORE (
   score_kyakushitsu_c, score_blood_c
 )
 SELECT
-  k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
+  r.course_code, r.year_code, r.kai, r.day_code, r.race_num, r.uma_num,
+  ROUND(CASE
+    WHEN r.raw < 2.61 THEN (r.raw - 0.19) * (10 / 2.42)
+    WHEN r.raw < 6.56 THEN 10 + (r.raw - 2.61) * (20 / 3.95)
+    WHEN r.raw < 9.73 THEN 30 + (r.raw - 6.56) * (20 / 3.17)
+    ELSE 50 + (r.raw - 9.73) * (20 / 3.17)
+  END, 1) AS overall_score,
+  ROUND(CASE
+    WHEN r.raw < 2.61 THEN (r.raw - 0.19) * (10 / 2.42)
+    WHEN r.raw < 6.56 THEN 10 + (r.raw - 2.61) * (20 / 3.95)
+    WHEN r.raw < 9.73 THEN 30 + (r.raw - 6.56) * (20 / 3.17)
+    ELSE 50 + (r.raw - 9.73) * (20 / 3.17)
+  END, 1) AS course_score,
+  ROUND(r.d_ten, 1), ROUND(r.d_agari, 1), ROUND(r.d_ichi, 1), ROUND(r.d_goal, 1), ROUND(r.d_combo, 1),
+  ROUND(r.d_idm, 1), ROUND(r.d_joho, 1), ROUND(r.d_kyu, 1), ROUND(r.d_chk, 1),
+  ROUND(r.d_kya, 1), ROUND(r.d_jos, 1), ROUND(r.d_kyo, 1), ROUND(r.d_chi + r.d_hah, 1),
+  ROUND(r.d_ten, 1), ROUND(r.d_agari, 1), ROUND(r.d_ichi, 1), ROUND(r.d_goal, 1), ROUND(r.d_combo, 1),
+  ROUND(r.d_kya, 1), ROUND(r.d_chi + r.d_hah, 1)
+FROM (
+  SELECT x.*,
+    x.d_ten + x.d_agari + x.d_ichi + x.d_goal + x.d_combo + x.d_idm + x.d_joho + x.d_kyu
+      + x.d_chk + x.d_kya + x.d_jos + x.d_kyo + x.d_chi + x.d_hah AS raw
+  FROM (
+    SELECT s.course_code, s.year_code, s.kai, s.day_code, s.race_num, s.uma_num,
+      COALESCE(a1.excess_dev, 0)  AS d_ten,   COALESCE(a2.excess_dev, 0)  AS d_agari,
+      COALESCE(a3.excess_dev, 0)  AS d_ichi,  COALESCE(a4.excess_dev, 0)  AS d_goal,
+      COALESCE(a5.excess_dev, 0)  AS d_combo, COALESCE(a6.excess_dev, 0)  AS d_idm,
+      COALESCE(a7.excess_dev, 0)  AS d_joho,  COALESCE(a8.excess_dev, 0)  AS d_kyu,
+      COALESCE(a9.excess_dev, 0)  AS d_chk,   COALESCE(a10.excess_dev, 0) AS d_kya,
+      COALESCE(a11.excess_dev, 0) AS d_jos,   COALESCE(a12.excess_dev, 0) AS d_kyo,
+      COALESCE(a13.excess_dev, 0) AS d_chi,   COALESCE(a14.excess_dev, 0) AS d_hah
+    FROM (
+      SELECT k.course_code, k.year_code, k.kai, k.day_code, k.race_num, k.uma_num,
+        CASE WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) = 1 THEN '1'
+             WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+             WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+             WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_ten,
+        CASE WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) = 1 THEN '1'
+             WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+             WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+             WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_agari,
+        CASE WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) = 1 THEN '1'
+             WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+             WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+             WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_ichi,
+        CASE WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) = 1 THEN '1'
+             WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
+             WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
+             WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) >= 7 THEN '7~' ELSE 'NA' END AS fv_goal,
+        -- 複合展開（Part2 の is_* フラグと同じ定義）
+        CASE
+          WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) <= 3 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
+               AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'dual_top'
+          WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) >= 7 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 2
+               AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'sen_oki'
+          WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) <= 2 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) >= 7
+               AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'hana_iki'
+          WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 3 AND 5 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
+               AND TRIM(k.ichi_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'mid_chaser'
+          ELSE 'other' END AS fv_combo,
+        CASE WHEN TRIM(k.idm) = '' OR k.idm IS NULL OR CAST(TRIM(k.idm) AS DECIMAL(6,1)) <= 0 THEN 'NA'
+             WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) < 30 THEN '~30'
+             WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) < 40 THEN '30~40'
+             WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) < 50 THEN '40~50'
+             WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) < 60 THEN '50~60'
+             WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) < 70 THEN '60~70' ELSE '70~' END AS fv_idm,
+        CASE WHEN k.joho_index IS NULL OR TRIM(k.joho_index) = '' OR CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) < 0 THEN 'NA'
+             WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) < 30 THEN '~30'
+             WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) < 50 THEN '30~50'
+             WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) < 70 THEN '50~70' ELSE '70~' END AS fv_joho,
+        CASE WHEN k.kyusha_index IS NULL OR TRIM(k.kyusha_index) = '' OR CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) <= 0 THEN 'NA'
+             WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) < 20 THEN '~20'
+             WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) < 30 THEN '20~30'
+             WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) < 40 THEN '30~40' ELSE '40~' END AS fv_kyu,
+        COALESCE(NULLIF(TRIM(k.chokyo_yajirushi), ''), 'NA')          AS fv_chk,
+        COALESCE(NULLIF(TRIM(k.kyakushitsu), ''), 'NA')               AS fv_kya,
+        COALESCE(NULLIF(TRIM(k.joshodo), ''), 'NA')                   AS fv_jos,
+        COALESCE(NULLIF(TRIM(k.kyori_tekisei), ''), 'NA')             AS fv_kyo,
+        COALESCE(NULLIF(TRIM(u.chichi_keitou_code), ''), 'NA')        AS fv_chi,
+        COALESCE(NULLIF(TRIM(u.hahachichi_keitou_code), ''), 'NA')    AS fv_hah
+      FROM T_KYI k
+      INNER JOIN T_BAC b
+        ON  b.course_code = k.course_code AND b.year_code = k.year_code
+        AND b.kai = k.kai AND b.day_code = k.day_code AND b.race_num = k.race_num
+      LEFT JOIN T_UKC u ON u.blood_reg_num = TRIM(k.blood_reg_num)
+      WHERE TRIM(b.tds_code) IN ('1','2')
+    ) s
+    LEFT JOIN T_HONMEI_FACTOR_AGG a1  ON a1.factor_type  = 'ten_rank'          AND a1.factor_value  = s.fv_ten
+    LEFT JOIN T_HONMEI_FACTOR_AGG a2  ON a2.factor_type  = 'agari_rank'        AND a2.factor_value  = s.fv_agari
+    LEFT JOIN T_HONMEI_FACTOR_AGG a3  ON a3.factor_type  = 'ichi_rank'         AND a3.factor_value  = s.fv_ichi
+    LEFT JOIN T_HONMEI_FACTOR_AGG a4  ON a4.factor_type  = 'goal_rank'         AND a4.factor_value  = s.fv_goal
+    LEFT JOIN T_HONMEI_FACTOR_AGG a5  ON a5.factor_type  = 'tenkai_combo'      AND a5.factor_value  = s.fv_combo
+    LEFT JOIN T_HONMEI_FACTOR_AGG a6  ON a6.factor_type  = 'idm_band'          AND a6.factor_value  = s.fv_idm
+    LEFT JOIN T_HONMEI_FACTOR_AGG a7  ON a7.factor_type  = 'joho_band'         AND a7.factor_value  = s.fv_joho
+    LEFT JOIN T_HONMEI_FACTOR_AGG a8  ON a8.factor_type  = 'kyusha_band'       AND a8.factor_value  = s.fv_kyu
+    LEFT JOIN T_HONMEI_FACTOR_AGG a9  ON a9.factor_type  = 'chokyo_yajirushi'  AND a9.factor_value  = s.fv_chk
+    LEFT JOIN T_HONMEI_FACTOR_AGG a10 ON a10.factor_type = 'kyakushitsu'       AND a10.factor_value = s.fv_kya
+    LEFT JOIN T_HONMEI_FACTOR_AGG a11 ON a11.factor_type = 'joshodo'           AND a11.factor_value = s.fv_jos
+    LEFT JOIN T_HONMEI_FACTOR_AGG a12 ON a12.factor_type = 'kyori_tekisei'     AND a12.factor_value = s.fv_kyo
+    LEFT JOIN T_HONMEI_FACTOR_AGG a13 ON a13.factor_type = 'chichi_keitou'     AND a13.factor_value = s.fv_chi
+    LEFT JOIN T_HONMEI_FACTOR_AGG a14 ON a14.factor_type = 'hahachichi_keitou' AND a14.factor_value = s.fv_hah
+  ) x
+) r;
 
-  -- ── 全体本命指数 ─────────────────────────────────────────────
-  ROUND(
-    -- テン順位
-    COALESCE(f_ten_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery
-    -- 上がり順位
-    + COALESCE(f_agari_o.win_recovery,  bl_o.win_recovery) - bl_o.win_recovery
-    -- 位置順位
-    + COALESCE(f_ichi_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery
-    -- ゴール順位
-    + COALESCE(f_goal_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery
-    -- 複合展開
-    + COALESCE(f_combo_o.win_recovery,  bl_o.win_recovery) - bl_o.win_recovery
-    -- IDM
-    + COALESCE(f_idm_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 情報指数
-    + COALESCE(f_joho_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery
-    -- 厩舎指数
-    + COALESCE(f_kyu_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 調教評価
-    + COALESCE(f_chk_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 脚質
-    + COALESCE(f_kya_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 上昇度
-    + COALESCE(f_jos_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 距離適性
-    + COALESCE(f_kyo_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 父系統
-    + COALESCE(f_chi_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-    -- 母父系統
-    + COALESCE(f_hah_o.win_recovery,    bl_o.win_recovery) - bl_o.win_recovery
-  , 1) AS overall_score,
+-- カバレッジ整合性チェック（芝ダの出走予定馬全頭に行があるか。差が0件であること）
+SELECT
+  (SELECT COUNT(*) FROM T_KYI k INNER JOIN T_BAC b
+     ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai
+    AND b.day_code=k.day_code AND b.race_num=k.race_num
+   WHERE TRIM(b.tds_code) IN ('1','2')) AS target_cnt,
+  (SELECT COUNT(*) FROM T_HONMEI_SCORE_NEW) AS scored_cnt;
 
-  -- ── コース別本命指数 ──────────────────────────────────────────
-  -- ルール: コース別データがある → コースベースラインで差分
-  --         フォールバック時   → 全体の偏差をそのまま使用（ベース混在を防ぐ）
-  ROUND(
-    COALESCE(f_ten_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ten_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_agari_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_agari_o.win_recovery - bl_o.win_recovery, 0)
-    + COALESCE(f_ichi_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ichi_o.win_recovery  - bl_o.win_recovery, 0)
-    + COALESCE(f_goal_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_goal_o.win_recovery  - bl_o.win_recovery, 0)
-    + COALESCE(f_combo_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_combo_o.win_recovery - bl_o.win_recovery, 0)
-    + COALESCE(f_idm_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_joho_o.win_recovery  - bl_o.win_recovery, 0)
-    + COALESCE(f_kyu_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_chk_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_kya_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_kya_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_jos_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_kyo_o.win_recovery   - bl_o.win_recovery, 0)
-    + COALESCE(f_chi_tds.win_recovery - bl_o.win_recovery, f_chi_o.win_recovery - bl_o.win_recovery, 0)
-    + COALESCE(f_hah_tds.win_recovery - bl_o.win_recovery, f_hah_o.win_recovery - bl_o.win_recovery, 0)
-  , 1) AS course_score,
-
-  -- ── スコア内訳 ────────────────────────────────────────────────
-  ROUND(COALESCE(f_ten_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_agari_o.win_recovery, bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_ichi_o.win_recovery,  bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_goal_o.win_recovery,  bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_combo_o.win_recovery, bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_idm_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_joho_o.win_recovery,  bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_kyu_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_chk_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_kya_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_jos_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_kyo_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-  ROUND(COALESCE(f_chi_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery +
-        COALESCE(f_hah_o.win_recovery,   bl_o.win_recovery) - bl_o.win_recovery, 1),
-
-  -- ── コース別内訳（course_scoreの各項に対応） ────────────────────
-  ROUND(COALESCE(f_ten_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ten_o.win_recovery   - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_agari_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_agari_o.win_recovery - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_ichi_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_ichi_o.win_recovery  - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_goal_c.win_recovery  - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_goal_o.win_recovery  - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_combo_c.win_recovery - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_combo_o.win_recovery - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_kya_c.win_recovery   - COALESCE(bl_c_raw.win_recovery, bl_o.win_recovery), f_kya_o.win_recovery   - bl_o.win_recovery, 0), 1),
-  ROUND(COALESCE(f_chi_tds.win_recovery - bl_o.win_recovery, f_chi_o.win_recovery - bl_o.win_recovery, 0)
-      + COALESCE(f_hah_tds.win_recovery - bl_o.win_recovery, f_hah_o.win_recovery - bl_o.win_recovery, 0), 1)
-
-FROM T_KYI k
-INNER JOIN T_BAC b
-  ON b.course_code=k.course_code AND b.year_code=k.year_code
-  AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
-
--- ── 全体ベースライン ──────────────────────────────────────────────
-CROSS JOIN (
-  SELECT win_recovery FROM T_HONMEI_FACTOR_AGG
-  WHERE factor_type='baseline' AND factor_value='all'
-    AND course_code='' AND tds_code='' AND dist_band=''
-) bl_o
-
--- ── コース別ベースライン（なければ全体を流用）──────────────────────
-LEFT JOIN (
-  SELECT a.course_code, a.tds_code, a.dist_band, a.win_recovery
-  FROM T_HONMEI_FACTOR_AGG a
-  WHERE a.factor_type='baseline' AND a.factor_value='all'
-    AND a.course_code <> ''
-) bl_c_raw ON bl_c_raw.course_code = k.course_code
-          AND bl_c_raw.tds_code  = TRIM(b.tds_code)
-          AND bl_c_raw.dist_band = CASE
-              WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-              WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-              WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-              WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-              WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-              ELSE '2401~' END
-
--- テン順位（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_ten_o
-  ON f_ten_o.factor_type='ten_rank' AND f_ten_o.course_code='' AND f_ten_o.tds_code='' AND f_ten_o.dist_band=''
-  AND f_ten_o.factor_value = CASE
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
--- 上がり順位（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_agari_o
-  ON f_agari_o.factor_type='agari_rank' AND f_agari_o.course_code='' AND f_agari_o.tds_code='' AND f_agari_o.dist_band=''
-  AND f_agari_o.factor_value = CASE
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
--- 位置順位（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_ichi_o
-  ON f_ichi_o.factor_type='ichi_rank' AND f_ichi_o.course_code='' AND f_ichi_o.tds_code='' AND f_ichi_o.dist_band=''
-  AND f_ichi_o.factor_value = CASE
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
--- ゴール順位（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_goal_o
-  ON f_goal_o.factor_type='goal_rank' AND f_goal_o.course_code='' AND f_goal_o.tds_code='' AND f_goal_o.dist_band=''
-  AND f_goal_o.factor_value = CASE
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
--- 複合展開（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_combo_o
-  ON f_combo_o.factor_type='tenkai_combo' AND f_combo_o.course_code='' AND f_combo_o.tds_code='' AND f_combo_o.dist_band=''
-  AND f_combo_o.factor_value = CASE
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) <= 3 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
-         AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'dual_top'
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) >= 7 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 2
-         AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'sen_oki'
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) <= 2 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) >= 7
-         AND TRIM(k.ten_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'hana_iki'
-    WHEN CAST(TRIM(k.ichi_index_juni)  AS UNSIGNED) BETWEEN 3 AND 5 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
-         AND TRIM(k.ichi_index_juni) <> '' AND TRIM(k.agari_index_juni) <> '' THEN 'mid_chaser'
-    ELSE 'other' END
-
--- IDM帯（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_idm_o
-  ON f_idm_o.factor_type='idm_band' AND f_idm_o.course_code='' AND f_idm_o.tds_code='' AND f_idm_o.dist_band=''
-  AND f_idm_o.factor_value = CASE
-    WHEN TRIM(k.idm)='' OR CAST(TRIM(k.idm) AS DECIMAL(6,1)) <= 0 THEN NULL
-    WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) <  30 THEN '~30'
-    WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) <  40 THEN '30~40'
-    WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) <  50 THEN '40~50'
-    WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) <  60 THEN '50~60'
-    WHEN CAST(TRIM(k.idm) AS DECIMAL(6,1)) <  70 THEN '60~70'
-    ELSE '70~' END
-
--- 情報指数帯（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_joho_o
-  ON f_joho_o.factor_type='joho_band' AND f_joho_o.course_code='' AND f_joho_o.tds_code='' AND f_joho_o.dist_band=''
-  AND f_joho_o.factor_value = CASE
-    WHEN TRIM(k.joho_index)='' OR CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) < 0 THEN NULL
-    WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) <  30 THEN '~30'
-    WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) <  50 THEN '30~50'
-    WHEN CAST(TRIM(k.joho_index) AS DECIMAL(6,1)) <  70 THEN '50~70'
-    ELSE '70~' END
-
--- 厩舎指数帯（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_kyu_o
-  ON f_kyu_o.factor_type='kyusha_band' AND f_kyu_o.course_code='' AND f_kyu_o.tds_code='' AND f_kyu_o.dist_band=''
-  AND f_kyu_o.factor_value = CASE
-    WHEN TRIM(k.kyusha_index)='' OR CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) <= 0 THEN NULL
-    WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) <  20 THEN '~20'
-    WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) <  30 THEN '20~30'
-    WHEN CAST(TRIM(k.kyusha_index) AS DECIMAL(6,1)) <  40 THEN '30~40'
-    ELSE '40~' END
-
--- 調教評価（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_chk_o
-  ON f_chk_o.factor_type='chokyo_hyoka' AND f_chk_o.course_code='' AND f_chk_o.tds_code='' AND f_chk_o.dist_band=''
-  AND f_chk_o.factor_value = TRIM(k.chokyo_yajirushi)
-
--- 脚質（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_kya_o
-  ON f_kya_o.factor_type='kyakushitsu' AND f_kya_o.course_code='' AND f_kya_o.tds_code='' AND f_kya_o.dist_band=''
-  AND f_kya_o.factor_value = TRIM(k.kyakushitsu)
-
--- 上昇度（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_jos_o
-  ON f_jos_o.factor_type='joshodo' AND f_jos_o.course_code='' AND f_jos_o.tds_code='' AND f_jos_o.dist_band=''
-  AND f_jos_o.factor_value = TRIM(k.joshodo)
-
--- 距離適性（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_kyo_o
-  ON f_kyo_o.factor_type='kyori_tekisei' AND f_kyo_o.course_code='' AND f_kyo_o.tds_code='' AND f_kyo_o.dist_band=''
-  AND f_kyo_o.factor_value = TRIM(k.kyori_tekisei)
-
--- 父系統（全体）
-LEFT JOIN T_UKC ukc ON ukc.blood_reg_num = TRIM(k.blood_reg_num)
-LEFT JOIN T_HONMEI_FACTOR_AGG f_chi_o
-  ON f_chi_o.factor_type='chichi_keitou' AND f_chi_o.course_code='' AND f_chi_o.tds_code='' AND f_chi_o.dist_band=''
-  AND f_chi_o.factor_value = TRIM(ukc.chichi_keitou_code)
-
--- 母父系統（全体）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_hah_o
-  ON f_hah_o.factor_type='hahachichi_keitou' AND f_hah_o.course_code='' AND f_hah_o.tds_code='' AND f_hah_o.dist_band=''
-  AND f_hah_o.factor_value = TRIM(ukc.hahachichi_keitou_code)
-
--- 脚質（コース×芝ダ別）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_kya_c
-  ON f_kya_c.factor_type='kyakushitsu'
-  AND f_kya_c.course_code=k.course_code AND f_kya_c.tds_code=TRIM(b.tds_code) AND f_kya_c.dist_band=''
-  AND f_kya_c.factor_value = TRIM(k.kyakushitsu)
-
--- 父系統（芝ダ別）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_chi_tds
-  ON f_chi_tds.factor_type='chichi_keitou'
-  AND f_chi_tds.course_code='' AND f_chi_tds.tds_code=TRIM(b.tds_code) AND f_chi_tds.dist_band=''
-  AND f_chi_tds.factor_value = TRIM(ukc.chichi_keitou_code)
-
--- 母父系統（芝ダ別）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_hah_tds
-  ON f_hah_tds.factor_type='hahachichi_keitou'
-  AND f_hah_tds.course_code='' AND f_hah_tds.tds_code=TRIM(b.tds_code) AND f_hah_tds.dist_band=''
-  AND f_hah_tds.factor_value = TRIM(ukc.hahachichi_keitou_code)
-
--- コース別展開系ファクター（コース+芝ダ+距離帯でルックアップ）
-LEFT JOIN T_HONMEI_FACTOR_AGG f_ten_c
-  ON f_ten_c.factor_type='ten_rank'
-  AND f_ten_c.course_code=k.course_code AND f_ten_c.tds_code=TRIM(b.tds_code)
-  AND f_ten_c.dist_band = CASE
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~' END
-  AND f_ten_c.factor_value = CASE
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.ten_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
-LEFT JOIN T_HONMEI_FACTOR_AGG f_agari_c
-  ON f_agari_c.factor_type='agari_rank'
-  AND f_agari_c.course_code=k.course_code AND f_agari_c.tds_code=TRIM(b.tds_code)
-  AND f_agari_c.dist_band = CASE
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~' END
-  AND f_agari_c.factor_value = CASE
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.agari_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
-LEFT JOIN T_HONMEI_FACTOR_AGG f_ichi_c
-  ON f_ichi_c.factor_type='ichi_rank'
-  AND f_ichi_c.course_code=k.course_code AND f_ichi_c.tds_code=TRIM(b.tds_code)
-  AND f_ichi_c.dist_band = CASE
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~' END
-  AND f_ichi_c.factor_value = CASE
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.ichi_index_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
-LEFT JOIN T_HONMEI_FACTOR_AGG f_goal_c
-  ON f_goal_c.factor_type='goal_rank'
-  AND f_goal_c.course_code=k.course_code AND f_goal_c.tds_code=TRIM(b.tds_code)
-  AND f_goal_c.dist_band = CASE
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~' END
-  AND f_goal_c.factor_value = CASE
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) = 1             THEN '1'
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 2 AND 3 THEN '2~3'
-    WHEN CAST(TRIM(k.goal_juni) AS UNSIGNED) BETWEEN 4 AND 6 THEN '4~6'
-    ELSE '7~' END
-
-LEFT JOIN T_HONMEI_FACTOR_AGG f_combo_c
-  ON f_combo_c.factor_type='tenkai_combo'
-  AND f_combo_c.course_code=k.course_code AND f_combo_c.tds_code=TRIM(b.tds_code)
-  AND f_combo_c.dist_band = CASE
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1200 THEN '~1200'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1400 THEN '1201~1400'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 1600 THEN '1401~1600'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2000 THEN '1601~2000'
-    WHEN CAST(TRIM(b.distance) AS UNSIGNED) <= 2400 THEN '2001~2400'
-    ELSE '2401~' END
-  AND f_combo_c.factor_value = CASE
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) <= 3 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
-         AND TRIM(k.ten_index_juni)<>'' AND TRIM(k.agari_index_juni)<>'' THEN 'dual_top'
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) >= 7 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 2
-         AND TRIM(k.ten_index_juni)<>'' AND TRIM(k.agari_index_juni)<>'' THEN 'sen_oki'
-    WHEN CAST(TRIM(k.ten_index_juni)   AS UNSIGNED) <= 2 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) >= 7
-         AND TRIM(k.ten_index_juni)<>'' AND TRIM(k.agari_index_juni)<>'' THEN 'hana_iki'
-    WHEN CAST(TRIM(k.ichi_index_juni)  AS UNSIGNED) BETWEEN 3 AND 5 AND CAST(TRIM(k.agari_index_juni) AS UNSIGNED) <= 3
-         AND TRIM(k.ichi_index_juni)<>'' AND TRIM(k.agari_index_juni)<>'' THEN 'mid_chaser'
-    ELSE 'other' END
-
-WHERE TRIM(b.tds_code) IN ('1','2')
-
-ON DUPLICATE KEY UPDATE
-  overall_score     = VALUES(overall_score),
-  course_score      = VALUES(course_score),
-  score_ten         = VALUES(score_ten),
-  score_agari       = VALUES(score_agari),
-  score_ichi        = VALUES(score_ichi),
-  score_goal        = VALUES(score_goal),
-  score_combo       = VALUES(score_combo),
-  score_idm         = VALUES(score_idm),
-  score_joho        = VALUES(score_joho),
-  score_kyusha      = VALUES(score_kyusha),
-  score_chokyo      = VALUES(score_chokyo),
-  score_kyakushitsu = VALUES(score_kyakushitsu),
-  score_joshodo     = VALUES(score_joshodo),
-  score_tekisei     = VALUES(score_tekisei),
-  score_blood       = VALUES(score_blood),
-  score_ten_c         = VALUES(score_ten_c),
-  score_agari_c       = VALUES(score_agari_c),
-  score_ichi_c        = VALUES(score_ichi_c),
-  score_goal_c        = VALUES(score_goal_c),
-  score_combo_c       = VALUES(score_combo_c),
-  score_kyakushitsu_c = VALUES(score_kyakushitsu_c),
-  score_blood_c       = VALUES(score_blood_c);
+DROP TABLE IF EXISTS T_HONMEI_SCORE_OLD;
+RENAME TABLE T_HONMEI_SCORE TO T_HONMEI_SCORE_OLD, T_HONMEI_SCORE_NEW TO T_HONMEI_SCORE;
+DROP TABLE T_HONMEI_SCORE_OLD;
