@@ -94,7 +94,9 @@ function inspect(sel, wrapSel) {
           if (cw === 0 ? tw > 3 : Math.abs(tw - cw) > 1) tight.push(`${i + 1}列目 ${cw}→${tw}px`);
         });
         if (tight.length) W(`${tag} col 指定幅より広がった列: ${tight.join(', ')}`);
-        if (Math.abs(t.tableWidth - t.colSum) > 1) W(`${tag} テーブル幅 ${t.tableWidth}px ≠ col合計 ${t.colSum}px`);
+        // 非表示列（width:0）は border-collapse の境界線の分だけ 1〜2px 残るので、その分は許容する
+        const hidden = t.colW.filter(v => v === 0).length;
+        if (Math.abs(t.tableWidth - t.colSum) > 1 + 2 * hidden) W(`${tag} テーブル幅 ${t.tableWidth}px ≠ col合計 ${t.colSum}px`);
         t.headers.forEach(h => {
           if (h.len <= 4 && h.lines !== 1) P(`${tag} 見出し「${h.text}」(${h.len}文字) が${h.lines}行（4文字以内は1行）`);
           if (h.len >= 5 && h.lines > 2) P(`${tag} 見出し「${h.text}」(${h.len}文字) が${h.lines}行（最大2行）`);

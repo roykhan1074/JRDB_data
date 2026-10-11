@@ -611,6 +611,19 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
   } catch (e) {
     console.error('[jump] 計算失敗', e);
   }
+  // 新馬指数（新馬戦のみ。仕様: document/指数/新馬指数_仕様書.md）
+  try {
+    const nb = await computeNewbieIndex(course_code, year_code, kai, day_code, race_num);
+    if (nb) {
+      for (const r of rows) {
+        const j = nb.get(String(r.uma_num).trim());
+        r.newbie_pts = j ? j.pts : null;
+        r.newbie_items = j ? j.items : [];
+      }
+    }
+  } catch (e) {
+    console.error('[newbie] 計算失敗', e);
+  }
   // 一変シグナル（scとは別運用。仕様: document/指数/一変シグナル_仕様書.md）
   try {
     const ippen = await computeIppenSignals(course_code, year_code, kai, day_code, race_num);
@@ -624,6 +637,48 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
   }
   res.json({ source: 'entries', rows });
 });
+
+// ── 障害指数・新馬指数用: 障害戦／新馬戦（芝ダ）の成績行をメモリに持ち、騎手・厩舎・父などの「その日より前」の成績を数える。
+// 以前は1要素ごとに T_SED 全体（約31万行）を集計していて、新馬戦の出馬表が約12秒・障害戦が約3秒かかっていた（2026-10-13）。
+// T_SED の件数・最終日付が変わったら（データ取込後）読み直す。確認は60秒に1回まで。
+type SedStatRow = { ymd: string; top3: number; place: number; [key: string]: any };
+const sedRowsCache: Record<'jump' | 'debut', { sig: string; rows: SedStatRow[]; checkedAt: number } | null> = { jump: null, debut: null };
+async function getSedRowsCache(kind: 'jump' | 'debut'): Promise<SedStatRow[]> {
+  const c = sedRowsCache[kind];
+  if (c && Date.now() - c.checkedAt < 60_000) return c.rows;
+  const [[sg]] = await pool.query<any>(`SELECT COUNT(*) AS n, MAX(ymd) AS m FROM T_SED`);
+  const sig = `${sg.n}|${sg.m}`;
+  if (c && c.sig === sig) { c.checkedAt = Date.now(); return c.rows; }
+  const top3 = `((TRIM(s.ijou_kubun) IN ('0','') OR s.ijou_kubun IS NULL) AND CAST(s.order_of_finish AS SIGNED) BETWEEN 1 AND 3)`;
+  const [rows] = kind === 'jump'
+    ? await pool.query<any>(
+        `SELECT TRIM(s.ymd) AS ymd, TRIM(s.jockey_code) AS jockey, TRIM(s.trainer_code) AS trainer, ${top3} AS top3, COALESCE(s.place, 0) AS place
+         FROM T_SED s WHERE s.tds_code='3'`)
+    : await pool.query<any>(
+        `SELECT TRIM(s.ymd) AS ymd, TRIM(s.jockey_code) AS jockey, TRIM(s.trainer_code) AS trainer,
+                TRIM(u.chichi_uma_name) AS sire, TRIM(u.seisansha_name) AS breeder, TRIM(k.umanushi_code) AS owner,
+                ${top3} AS top3, COALESCE(s.place, 0) AS place
+         FROM T_SED s
+         LEFT JOIN T_UKC u ON u.blood_reg_num=s.blood_num
+         LEFT JOIN T_KYI k ON k.course_code=s.course_code AND k.year_code=s.year_code AND k.kai=s.kai AND k.day_code=s.day_code AND k.race_num=s.race_num AND k.uma_num=s.umaban
+         WHERE TRIM(s.class)='A1' AND s.tds_code IN ('1','2')`);
+  const list = (rows as any[]).map(r => ({ ...r, top3: Number(r.top3), place: Number(r.place) }));
+  sedRowsCache[kind] = { sig, rows: list, checkedAt: Date.now() };
+  return list;
+}
+function statsBefore(rows: SedStatRow[], key: string, codes: string[], beforeYmd: string): Map<string, { n: number; t3: number; pl: number }> {
+  const want = new Set(codes);
+  const m = new Map<string, { n: number; t3: number; pl: number }>();
+  if (!want.size) return m;
+  for (const r of rows) {
+    const code = r[key];
+    if (!code || !want.has(code) || !(r.ymd < beforeYmd)) continue;
+    const st = m.get(code) ?? { n: 0, t3: 0, pl: 0 };
+    st.n++; st.t3 += r.top3; st.pl += r.place;
+    m.set(code, st);
+  }
+  return m;
+}
 
 // ── 障害指数: 障害戦の馬に、34要素の点数（+2〜−2）を合計して返す。障害戦以外は null。
 // 要素と点数は python/research/jump_wf.py の2026年時点の選定結果（固定ルール）。参照計算: python/research/jump_fixed.py（突き合わせ済み）。
@@ -661,20 +716,10 @@ async function computeJumpIndex(course_code: string, year_code: string, kai: str
             order_of_finish, ijou_kubun, win_diff FROM T_SED WHERE blood_num IN (?) AND ymd < ? ORDER BY ymd`, [bloods, curYmd]) : [[]];
   const histBy = new Map<string, any[]>();
   for (const h of hist as any[]) { if (!histBy.has(h.blood)) histBy.set(h.blood, []); histBy.get(h.blood)!.push(h); }
-  // 騎手・厩舎の障害成績（今走の日付より前）
-  const pstats = async (col: 'jockey_code' | 'trainer_code', codes: string[]) => {
-    const m = new Map<string, { n: number; t3: number; pl: number }>();
-    if (!codes.length) return m;
-    const [rs] = await pool.query<any>(
-      `SELECT TRIM(${col}) AS code, COUNT(*) AS n,
-              SUM((TRIM(ijou_kubun) IN ('0','') OR ijou_kubun IS NULL) AND CAST(order_of_finish AS SIGNED) BETWEEN 1 AND 3) AS t3,
-              SUM(COALESCE(place, 0)) AS pl
-       FROM T_SED WHERE tds_code='3' AND ymd < ? AND ${col} IN (?) GROUP BY TRIM(${col})`, [curYmd, codes]);
-    for (const r of rs) m.set(r.code, { n: Number(r.n), t3: Number(r.t3), pl: Number(r.pl) });
-    return m;
-  };
-  const jSt = await pstats('jockey_code', [...new Set(cur.map((r: any) => r.jockey).filter(Boolean))] as string[]);
-  const tSt = await pstats('trainer_code', [...new Set(cur.map((r: any) => r.trainer).filter(Boolean))] as string[]);
+  // 騎手・厩舎の障害成績（今走の日付より前）: メモリ上の障害戦の成績行から数える（getSedRowsCache）
+  const jumpRows = await getSedRowsCache('jump');
+  const jSt = statsBefore(jumpRows, 'jockey', [...new Set(cur.map((r: any) => r.jockey).filter(Boolean))] as string[], curYmd);
+  const tSt = statsBefore(jumpRows, 'trainer', [...new Set(cur.map((r: any) => r.trainer).filter(Boolean))] as string[], curYmd);
   const CLS: Record<string, number> = { A1: 0, A2: 0, A3: 0, '05': 1, '10': 2, '16': 3, OP: 4 };
   const out = new Map<string, { pts: number; items: string[] }>();
   cur.forEach((r: any, i: number) => {
@@ -726,6 +771,92 @@ async function computeJumpIndex(course_code: string, year_code: string, kai: str
       [first, -2, '初障害'],
       [first && fcm >= 2, -2, '初障害×平地2勝クラス以上'],
       [first && fcm === 0, -2, '初障害×平地未勝利のみ'],
+    ];
+    let pts = 0; const items: string[] = [];
+    for (const [f, p, lab] of rules) if (f) { pts += p; items.push(`${lab}(${p > 0 ? '+' : ''}${p})`); }
+    out.set(r.uma, { pts, items });
+  });
+  return out;
+}
+
+// ── 新馬指数: 新馬戦（T_BAC.class='A1'、芝ダ）の馬に、29要素の点数（+2〜−2）を合計して返す。新馬戦以外は null。
+// 要素と点数は python/research/newbie_wf.py の2026年時点の選定結果（固定ルール）。参照計算: python/research/newbie_fixed.py（突き合わせ済み）。
+// 父・厩舎・騎手・生産者・馬主の新馬成績は、今走の日付より前の新馬戦（芝ダ）の T_SED だけで数える。
+async function computeNewbieIndex(course_code: string, year_code: string, kai: string, day_code: string, race_num: string): Promise<Map<string, { pts: number; items: string[] }> | null> {
+  const n = (v: any): number => { const x = parseFloat(String(v ?? '').trim()); return isNaN(x) ? NaN : x; };
+  const s = (v: any): string => String(v ?? '').trim();
+  const [cur] = await pool.query<any>(
+    `SELECT TRIM(k.uma_num) AS uma, k.idm, k.joho_index, k.gekiso_index, k.ten_index, k.kijun_odds, CAST(k.waku_num AS UNSIGNED) AS waku,
+            TRIM(k.chokyo_yajirushi) AS yaji, TRIM(k.kyusha_hyoka) AS kyu_hyoka, TRIM(k.nyukyu_nichi_mae) AS nyu_d,
+            TRIM(k.kishu_code) AS jockey, TRIM(k.trainer_code) AS trainer, TRIM(k.umanushi_code) AS owner,
+            c.oi_index, c.shiage_index, c.isshuumae_oi_index AS oi_1w, TRIM(c.chokyo_ryo_hyoka) AS ryo,
+            TRIM(b.ymd) AS ymd, TRIM(b.tds_code) AS tds, TRIM(b.class) AS cls,
+            TRIM(u.birthdate) AS birth, TRIM(u.chichi_uma_name) AS sire, TRIM(u.seisansha_name) AS breeder
+     FROM T_KYI k
+     JOIN T_BAC b ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+     LEFT JOIN T_CYB c ON c.course_code=k.course_code AND c.year_code=k.year_code AND c.kai=k.kai AND c.day_code=k.day_code AND c.race_num=k.race_num AND c.uma_num=k.uma_num
+     LEFT JOIN T_UKC u ON u.blood_reg_num=k.blood_reg_num
+     WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?`,
+    [course_code, year_code, kai, day_code, race_num]);
+  if (!cur.length || cur[0].cls !== 'A1' || (cur[0].tds !== '1' && cur[0].tds !== '2')) return null;
+  const curYmd: string = cur[0].ymd;
+  const heads = cur.length;
+  const rankDesc = (key: string) => {
+    const vals = cur.map((r: any) => n(r[key]));
+    return vals.map((v: number) => isNaN(v) ? NaN : 1 + vals.filter((w: number) => !isNaN(w) && w > v).length);
+  };
+  const oddsVals = cur.map((r: any) => n(r.kijun_odds));
+  const rOdds = oddsVals.map((v: number) => isNaN(v) ? NaN : 1 + oddsVals.filter((w: number) => !isNaN(w) && w < v).length);
+  const rIdm = rankDesc('idm'), rJoho = rankDesc('joho_index'), rGeki = rankDesc('gekiso_index'), rTen = rankDesc('ten_index');
+  const rOi = rankDesc('oi_index'), rShiage = rankDesc('shiage_index'), rOi1w = rankDesc('oi_1w');
+  // 新馬戦での成績（今走の日付より前）: key 別の出走数・3着内数・複勝払戻の合計。メモリ上の新馬戦の成績行から数える（getSedRowsCache）
+  const uniq = (key: string) => [...new Set(cur.map((r: any) => r[key]).filter(Boolean))] as string[];
+  const debutRows = await getSedRowsCache('debut');
+  const sireSt = statsBefore(debutRows, 'sire', uniq('sire'), curYmd);
+  const breederSt = statsBefore(debutRows, 'breeder', uniq('breeder'), curYmd);
+  const trainerSt = statsBefore(debutRows, 'trainer', uniq('trainer'), curYmd);
+  const jockeySt = statsBefore(debutRows, 'jockey', uniq('jockey'), curYmd);
+  const ownerSt = statsBefore(debutRows, 'owner', uniq('owner'), curYmd);
+  const rate = (st: { n: number; t3: number; pl: number } | undefined, min: number) => (st && st.n >= min ? st : null);
+  const month = Number(curYmd.slice(4, 6));
+  const out = new Map<string, { pts: number; items: string[] }>();
+  cur.forEach((r: any, i: number) => {
+    const birthM = n(s(r.birth).slice(4, 6));
+    const age = Number(curYmd.slice(0, 4)) - n(s(r.birth).slice(0, 4));
+    const sr = rate(sireSt.get(r.sire), 30), tr = rate(trainerSt.get(r.trainer), 30), jr = rate(jockeySt.get(r.jockey), 50);
+    const br = rate(breederSt.get(r.breeder), 50), or = rate(ownerSt.get(r.owner), 30);
+    const sireN = sireSt.get(r.sire)?.n ?? 0;
+    const dirt = r.tds === '2', outer = Number(r.waku) >= 7;
+    const rules: [boolean, number, string][] = [
+      [['社台ファーム', '追分ファーム', '社台コーポレーション白老ファーム'].includes(s(r.breeder)), 2, '社台ファーム・追分・白老生産'],
+      [rOi[i] <= 3, 2, '追切指数レース内3位以内'],
+      [!!sr && sr.pl / sr.n >= 90, 2, '父の新馬複勝回収率90%以上'],
+      [rOi1w[i] === 1, 1, '1週前追切がレース内1位'],
+      [n(r.nyu_d) <= 30, 1, '入厩30日以内'],
+      [!!tr && tr.pl / tr.n >= 90, 1, '厩舎の新馬複勝回収率90%以上'],
+      [dirt && outer, 1, 'ダートの外枠(7〜8枠)'],
+      [rGeki[i] === 1, 1, '激走指数1位'],
+      [outer, 1, '外枠(7〜8枠)'],
+      [age === 3, 1, '3歳の新馬戦'],
+      [rOi[i] === 1, 1, '追切指数1位'],
+      [birthM === 4, 1, '4月生まれ'],
+      [dirt, 1, 'ダート'],
+      [month >= 1 && month <= 3, 1, '1〜3月'],
+      [rJoho[i] >= heads - 2, -1, '情報指数レース内下位(下から3頭)'],
+      [month === 8 || month === 9, -1, '8〜9月'],
+      [!!jr && jr.t3 / jr.n >= 0.35, -1, '騎手の新馬3着内率35%以上'],
+      [sireN < 10, -1, '父の新馬出走が10走未満(新種牡馬など)'],
+      [birthM >= 5 && birthM <= 12, -1, '5月以降生まれ'],
+      [rTen[i] >= heads - 2, -2, 'テン指数レース内下位(下から3頭)'],
+      [r.ryo === 'A', -2, '調教量評価A'],
+      [rShiage[i] >= heads - 2, -2, '仕上指数レース内下位(下から3頭)'],
+      [!!or && or.pl / or.n < 60, -2, '馬主の新馬複勝回収率60%未満'],
+      [rOdds[i] - rIdm[i] <= -3, -2, 'IDMの割に人気(人気順位−IDM順位≤−3)'],
+      [rOi[i] >= heads - 2, -2, '追切指数レース内下位(下から3頭)'],
+      [!!br && br.t3 / br.n < 0.15, -2, '生産者の新馬3着内率15%未満'],
+      [!!or && or.t3 / or.n < 0.15, -2, '馬主の新馬3着内率15%未満'],
+      [r.kyu_hyoka === '4', -2, '厩舎評価4(弱気)'],
+      [r.yaji === '4' || r.yaji === '5', -2, '調教矢印↓'],
     ];
     let pts = 0; const items: string[] = [];
     for (const [f, p, lab] of rules) if (f) { pts += p; items.push(`${lab}(${p > 0 ? '+' : ''}${p})`); }
@@ -3334,5 +3465,11 @@ app.listen(PORT, () => {
       .then(() => console.log('騎手統計キャッシュ: 準備完了'))
       .catch(() => {});
   }, 500);
+  // 障害指数・新馬指数用の成績行キャッシュを先読み（起動直後の最初の障害戦・新馬戦の出馬表が遅くならないように）
+  setTimeout(() => {
+    Promise.all([getSedRowsCache('jump'), getSedRowsCache('debut')])
+      .then(([j, d]) => console.log(`障害/新馬 成績キャッシュ: 準備完了（障害 ${j.length}行・新馬 ${d.length}行）`))
+      .catch(e => console.error('[sed-cache] 先読み失敗', e));
+  }, 1000);
   initFactTableStatus().catch(() => {});
 });

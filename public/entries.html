@@ -176,10 +176,18 @@
     .stable-bad  { color: #7c3aed; font-weight: 600; }
 
     /* 着順・払戻 */
-    .result-1st  { color:#dc2626; font-weight:700; }
-    .result-2nd  { color:#2563eb; font-weight:700; }
-    .result-3rd  { color:#16a34a; font-weight:700; }
+    /* 1〜3着は塗りバッジ＋セル背景（色は rankNumCell / rankCellBg と同じ: 1位=赤/ピンク、2・3位=緑/薄緑） */
+    .result-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 22px; height: 20px; border-radius: 4px;
+      font-size: .8rem; font-weight: 800; padding: 0 4px; color: #fff;
+    }
+    .result-1st  { background:#dc2626; }
+    .result-2nd, .result-3rd { background:#15803d; }
+    .result-bg-1 { background:#fbcfe8; }
+    .result-bg-23 { background:#bbf7d0; }
     .result-pay  { font-size:.78rem; color:#374151; }
+    .result-bg-1 .result-pay, .result-bg-23 .result-pay { font-weight:700; color:#111827; }
     .result-ijou { color:#9ca3af; font-size:.72rem; }
     /* 調教SP */
     .sp-a { color:#dc2626; font-weight:700; }
@@ -297,7 +305,7 @@
   <div class="table-wrap" id="table-wrap" style="display:none">
     <table>
       <colgroup>
-        <col style="width:28px">  <!-- 枠 -->
+        <col style="width:34px">  <!-- 枠（枠バッジ20px+padding。2026-10-11 実幅に合わせ28→34） -->
         <col style="width:28px">  <!-- 馬番 -->
         <col style="width:46px">  <!-- 予想（自分印） -->
         <col style="width:40px">  <!-- 推奨（推奨印） -->
@@ -306,19 +314,19 @@
         <col style="width:0">      <!-- EX指数全体（非表示） -->
         <col style="width:56px">  <!-- 期待値指数（2026-09-26、EX指数コースの表示位置に移動） -->
         <col style="width:48px">  <!-- 一変シグナル（2026-10-11、scとは別運用） -->
-        <col id="col-jump" style="width:0">  <!-- 障害指数（2026-10-12、障害戦のときだけ 48px にする。それ以外は非表示） -->
+        <col id="col-jump" style="width:0">  <!-- 障害指数（2026-10-12、障害戦のみ）/ 新馬指数（2026-10-13、新馬戦のみ）。該当レースのときだけ 48px、それ以外は非表示 -->
         <col style="width:0">      <!-- 本命指数全体（非表示） -->
         <col style="width:0">      <!-- 本命指数コース（非表示。2026-09-27ユーザー指示） -->
         <col style="width:48px">  <!-- 脚質 -->
         <col style="width:60px">  <!-- オッズ -->
-        <col style="width:76px">  <!-- 騎手 -->
-        <col style="width:76px">  <!-- 厩舎 -->
+        <col style="width:94px">  <!-- 騎手（最長6文字「Ａ．シュタル」が入る幅。レースで列が動かないよう2026-10-11 76→94） -->
+        <col style="width:94px">  <!-- 厩舎（最長6文字「Ａ．オブライ」が入る幅。2026-10-11 76→94） -->
         <col style="width:0">     <!-- 騎×厩（非表示） -->
-        <col style="width:20px">  <!-- 情報印 mark -->
+        <col style="width:25px">  <!-- 情報印 mark（印+padding。2026-10-11 実幅に合わせ20→25） -->
         <col style="width:36px">  <!-- 情報印 idx -->
-        <col style="width:20px">  <!-- 展開印 mark -->
+        <col style="width:25px">  <!-- 展開印 mark（印+padding。2026-10-11 実幅に合わせ20→25） -->
         <col style="width:36px">  <!-- 展開印 idx -->
-        <col style="width:20px">  <!-- IDM印 mark -->
+        <col style="width:25px">  <!-- IDM印 mark（印+padding。2026-10-11 実幅に合わせ20→25） -->
         <col style="width:36px">  <!-- IDM印 idx -->
         <col style="width:48px">  <!-- 前3F -->
         <col style="width:48px">  <!-- 後3F -->
@@ -342,7 +350,7 @@
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">EX指数全体</th>
           <th rowspan="2" class="group-sep col-divider hdr-nowrap" title="sc（注目馬複合シグナル）: 推奨買い目と同じ点数。指数・調教・展開予測・指数の抜け・人気とのずれ等のシグナルの合計&#10;色: 7以上=ピンク / 6=黄色 / 1〜5=無色 / 0以下=グレー&#10;先読みなしの検証（2022〜2026）で、複勝回収率が同じ基準オッズ帯の馬の平均より sc6:+7.8 / sc7:+11.4 / sc9:+15.4pt（sc0:−7.6pt）&#10;セルにマウスを乗せるとシグナルの内訳を表示。詳細は 指数帯別回収率 ページの sc 表">sc</th>
           <th rowspan="2" class="group-sep hdr-nowrap" title="一変シグナル: 前走から状況が変わってプラスになりうる要素（12種）が4個以上=A / 3個=B（2個以下は空欄）。scとは別の「気づき」用&#10;要素: 前走ハイペースを先行して6着以下 / 前走4角で外を回って4着以下 / 前走で不利 / 前走がハイレベル戦で負け / 実績のある芝ダ・距離・回りに戻る / ハンデ戦で斤量2kg以上減 / 外厩明け / 厩舎指数の良化 / 前走が稍重 / 距離短縮&#10;色: A=ピンク / B=黄色&#10;参考（2022〜2026、穴馬=基準10倍以上の複勝回収率）: 0個60% / 2個74% / B 77.6% / A 86.4%（同オッズ帯の平均より B +8.3pt / A +16.6pt）。1レースあたり平均 A 0.7頭・B 1.3頭&#10;セルにマウスを乗せると個数と当てはまった要素を表示">一変</th>
-          <th rowspan="2" id="th-jump" class="group-sep hdr-nowrap" style="width:0;padding:0;border:0;overflow:hidden;font-size:0" title="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示">障害</th>
+          <th rowspan="2" id="th-jump" class="group-sep hdr-nowrap" style="width:0;padding:0;border:0;overflow:hidden;font-size:0" title="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-jump="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-newbie="新馬指数（新馬戦のみ）: 新馬戦の成績から選んだ29要素の点数（+2〜−2）の合計をランク表示&#10;A=+6点以上（上位約7%）ピンク / B=+5点（上位約7〜12%）黄色 / E=−4点以下（下位約13%）グレー / それ以外は空欄&#10;主な要素: プラス=追切指数3位以内・社台F/追分/白老生産・新馬で回収率の高い父/厩舎・入厩30日以内・1週前追切1位・外枠 / マイナス=追切/仕上/テン指数が下位・調教量評価A・調教矢印↓・厩舎評価4・IDMの割に人気・新馬成績の悪い生産者/馬主&#10;参考（2021〜2026の複勝回収率）: A 約101% / B 100% / E 36%。先読みなしの検証では点数のレース内1位が複勝約93%&#10;セルにマウスを乗せると点数と内訳を表示">障害</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命全体</th>
           <th rowspan="2" class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命指数コース</th>
           <th rowspan="2" class="group-sep hdr-nowrap">脚質</th>
@@ -832,16 +840,26 @@
       return ' style="background:#e5e7eb"';
     }
 
-    // 障害指数（2026-10-12、障害戦のときだけ列を表示）: サーバーの computeJumpIndex() が返す jump_pts / jump_items。
-    // A=+4以上（ピンク）/ B=+3（黄色）/ E=−6以下（グレー、文字色は sp-e と同じ #6b7280）/ それ以外は空欄
+    // 列#10: 障害指数（2026-10-12、障害戦のみ）/ 新馬指数（2026-10-13、新馬戦のみ）。同じ列を使い、どちらでもないレースは非表示。
+    //   障害指数: サーバーの computeJumpIndex() が返す jump_pts / jump_items。A=+4以上 / B=+3 / E=−6以下
+    //   新馬指数: サーバーの computeNewbieIndex() が返す newbie_pts / newbie_items。A=+6以上 / B=+5 / E=−4以下
+    //   色: A=ピンク / B=黄色 / E=グレー（文字色は sp-e と同じ #6b7280）/ それ以外は空欄
     const isJumpRace = String(race.tds_code ?? '').trim() === '3';
-    document.getElementById('col-jump').style.width = isJumpRace ? '48px' : '0';
-    document.getElementById('th-jump').setAttribute('style', isJumpRace ? '' : 'width:0;padding:0;border:0;overflow:hidden;font-size:0');
-    function jumpGrade(p) {
-      if (p === undefined || p === null || isNaN(p)) return null;
-      if (p >= 4) return { g: 'A', style: ' style="background:#fbcfe8"', color: '#333' };
-      if (p >= 3) return { g: 'B', style: ' style="background:#fef9c3"', color: '#333' };
-      if (p <= -6) return { g: 'E', style: ' style="background:#e5e7eb"', color: '#6b7280' };
+    const isNewbieRace = String(race.class ?? '').trim() === 'A1' && ['1', '2'].includes(String(race.tds_code ?? '').trim());
+    const special = isJumpRace ? { label: '障害', name: '障害指数', ptsKey: 'jump_pts', itemsKey: 'jump_items', a: 4, b: 3, e: -6 }
+                  : isNewbieRace ? { label: '新馬', name: '新馬指数', ptsKey: 'newbie_pts', itemsKey: 'newbie_items', a: 6, b: 5, e: -4 } : null;
+    const thSpecial = document.getElementById('th-jump');
+    document.getElementById('col-jump').style.width = special ? '48px' : '0';
+    thSpecial.setAttribute('style', special ? '' : 'width:0;padding:0;border:0;overflow:hidden;font-size:0');
+    if (special) {
+      thSpecial.textContent = special.label;
+      thSpecial.title = isJumpRace ? thSpecial.dataset.titleJump : thSpecial.dataset.titleNewbie;
+    }
+    function specialGrade(p) {
+      if (!special || p === undefined || p === null || isNaN(p)) return null;
+      if (p >= special.a) return { g: 'A', style: ' style="background:#fbcfe8"', color: '#333' };
+      if (p >= special.b) return { g: 'B', style: ' style="background:#fef9c3"', color: '#333' };
+      if (p <= special.e) return { g: 'E', style: ' style="background:#e5e7eb"', color: '#6b7280' };
       return null;
     }
 
@@ -1179,6 +1197,9 @@
         ? `複勝妙味シグナル（複勝sc=${scTotal}点 × オッズ${oddsV.toFixed(1)}倍）\n先読みなしの検証（2022〜2026）: 複勝回収率96.1%（同じオッズ帯の平均より+20.2pt）・3着内率19.2%。100%超は保証されない\n内訳: ${[scIdx&&'指数◎(EX35/本命10以上)',scIdxStrong&&'指数◎◎(EX125/本命30以上)',scCombo&&'騎×厩複勝100%+',scChokyo&&'調教充実',scGoal&&'展開1-2位',scJoho&&'情報印1-2位',scTa&&'テン/上がり1位'].filter(Boolean).join(' / ')}`
         : '';
       const rowClasses = [isChukiten && 'chukiten', isFukushoSignal && 'fukusho-signal'].filter(Boolean).join(' ');
+      // 成績セル（着順・単勝・複勝）の背景: 1着=ピンク、2・3着=薄緑（取消・除外等は無色）
+      const resOrd = (String(r.result_ijou ?? '').trim() || '0') === '0' ? parseInt(String(r.result_order ?? '').trim()) : NaN;
+      const resBg = resOrd === 1 ? ' result-bg-1' : (resOrd === 2 || resOrd === 3) ? ' result-bg-23' : '';
 
       return `<tr${rowClasses ? ` class="${rowClasses}"` : ''}>
         <td>${wakuHtml}</td>
@@ -1208,12 +1229,13 @@
           return `<td class="group-sep"${ippenBg(n)} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:#333;font-weight:700">${grade}</span></td>`;
         })()}
         ${(() => {
-          // 障害指数（2026-10-12、障害戦のみ）
-          if (!isJumpRace) return '<td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>';
-          const p = r.jump_pts === null || r.jump_pts === undefined ? NaN : Number(r.jump_pts);
+          // 列#10: 障害指数（障害戦のみ）/ 新馬指数（新馬戦のみ）
+          if (!special) return '<td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>';
+          const pv = r[special.ptsKey];
+          const p = pv === null || pv === undefined ? NaN : Number(pv);
           if (isNaN(p)) return '<td class="group-sep"></td>';
-          const jg = jumpGrade(p);
-          const tip = `障害指数 ${p > 0 ? '+' : ''}${p}点${jg ? `（${jg.g}）` : ''}：${(r.jump_items || []).join(' / ') || '該当なし'}`;
+          const jg = specialGrade(p);
+          const tip = `${special.name} ${p > 0 ? '+' : ''}${p}点${jg ? `（${jg.g}）` : ''}：${(r[special.itemsKey] || []).join(' / ') || '該当なし'}`;
           if (!jg) return `<td class="group-sep" data-tip="${tip.replace(/"/g, '&quot;')}"></td>`;
           return `<td class="group-sep"${jg.style} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:${jg.color};font-weight:700">${jg.g}</span></td>`;
         })()}
@@ -1238,22 +1260,22 @@
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
-        <td class="group-sep col-divider">${(()=>{
+        <td class="group-sep col-divider${resBg}">${(()=>{
           const ijou = String(r.result_ijou ?? '').trim();
           const IJOU_LABEL = { '1': '取消', '2': '除外', '3': '中止', '4': '失格', '5': '降着' };
           if (ijou !== '' && ijou !== '0') return `<span class="result-ijou">${IJOU_LABEL[ijou] || ('異常' + ijou)}</span>`;
           const ord = parseInt(String(r.result_order ?? '').trim());
           if (isNaN(ord) || ord <= 0) return '';
           const cls = ord===1?'result-1st':ord===2?'result-2nd':ord===3?'result-3rd':'';
-          return `<span class="${cls}">${ord}</span>`;
+          return cls ? `<span class="result-badge ${cls}">${ord}</span>` : `<span>${ord}</span>`;
         })()}</td>
-        <td>${(()=>{
+        <td class="${resBg.trim()}">${(()=>{
           const ord = parseInt(String(r.result_order ?? '').trim());
           if (ord !== 1) return '';
           const v = parseInt(String(r.result_win ?? '').trim());
           return isNaN(v)||v<=0 ? '' : `<span class="result-pay">${v.toLocaleString()}</span>`;
         })()}</td>
-        <td>${(()=>{
+        <td class="${resBg.trim()}">${(()=>{
           const ord = parseInt(String(r.result_order ?? '').trim());
           if (isNaN(ord) || ord > 3 || ord <= 0) return '';
           const v = parseInt(String(r.result_place ?? '').trim());
