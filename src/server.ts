@@ -598,8 +598,128 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
      ORDER BY CAST(k.uma_num AS UNSIGNED)`,
     [course_code, year_code, kai, day_code, race_num]
   );
+  // 一変シグナル（scとは別運用。仕様: document/指数/一変シグナル_仕様書.md）
+  try {
+    const ippen = await computeIppenSignals(course_code, year_code, kai, day_code, race_num);
+    for (const r of rows) {
+      const items = ippen.get(String(r.uma_num).trim()) ?? [];
+      r.ippen_n = items.length;
+      r.ippen_items = items;
+    }
+  } catch (e) {
+    console.error('[ippen] 計算失敗', e);
+  }
   res.json({ source: 'entries', rows });
 });
+
+// ── 一変シグナル: 前走から状況が変わってプラスになりうる要素（12種）の当てはまる数と内訳を返す。
+// すべてレース前に分かる情報（今走の T_KYI/T_BAC、前走の T_KYI/T_SED、今走より前の T_SED）だけを使う。
+// 定義は python/research/ippen_signal_ref.py と同一（突き合わせ済み）。根拠の検証は ippen_plus_wf.py（walk-forward）。
+const IPPEN_ITEMS = [
+  '前走ハイペースを先行して6着以下', '前走4角で外を回って4着以下', '前走で不利(2段階以上)', '前走がハイレベル戦で4着以下',
+  '実績のある芝ダに戻る', '実績のある距離に戻る(前走6着以下)', '実績のある回りに戻る(前走逆回りで6着以下)', 'ハンデ戦で斤量2kg以上減',
+  '外厩明け(中8〜11週×放牧先A)', '厩舎指数+10〜20良化(前走6着以下)', '前走が稍重', '距離200m以上短縮',
+];
+async function computeIppenSignals(course_code: string, year_code: string, kai: string, day_code: string, race_num: string): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const n = (v: any): number => { const x = parseFloat(String(v ?? '').trim()); return isNaN(x) ? NaN : x; };
+  const s = (v: any): string => String(v ?? '').trim();
+  const isTop3 = (r: any) => (s(r.ijou_kubun) === '0' || s(r.ijou_kubun) === '') && n(r.order_of_finish) >= 1 && n(r.order_of_finish) <= 3;
+  const [cur] = await pool.query<any>(
+    `SELECT TRIM(k.uma_num) AS uma, TRIM(k.blood_reg_num) AS blood, TRIM(k.prev1_seiseki_key) AS p1key, TRIM(k.prev1_race_key) AS prk,
+            TRIM(k.rotation) AS rotation, TRIM(k.hohbokusaki_rank) AS hob_r, k.kyusha_index, k.futan_juryo,
+            TRIM(b.ymd) AS ymd, TRIM(b.tds_code) AS tds, CAST(TRIM(b.distance) AS UNSIGNED) AS dist, TRIM(b.weight) AS wtype, TRIM(b.migihidari) AS lr
+     FROM T_KYI k JOIN T_BAC b ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+     WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?`,
+    [course_code, year_code, kai, day_code, race_num]);
+  if (!cur.length) return out;
+  const curYmd: string = cur[0].ymd;
+  const bloods: string[] = cur.map((r: any) => r.blood).filter(Boolean);
+  if (!bloods.length) return out;
+  // 今走より前の全成績（過去の実績と前走の詳細）
+  const [hist] = await pool.query<any>(
+    `SELECT TRIM(blood_num) AS blood, TRIM(ymd) AS ymd, CONCAT(course_code,year_code,kai,day_code,race_num) AS srid,
+            TRIM(tds_code) AS tds, CAST(TRIM(distance) AS UNSIGNED) AS dist, TRIM(migihidari) AS lr, order_of_finish, ijou_kubun,
+            TRIM(race_pace) AS rpace, TRIM(race_kyakushitsu) AS rkya, TRIM(corner_4_posi) AS c4posi, TRIM(baba_cond) AS baba,
+            kinryou, furi, mae_furi, naka_furi, ushiro_furi
+     FROM T_SED WHERE blood_num IN (?) AND ymd < ?`, [bloods, curYmd]);
+  const histBy = new Map<string, any[]>();
+  for (const h of hist) { if (!histBy.has(h.blood)) histBy.set(h.blood, []); histBy.get(h.blood)!.push(h); }
+  // 前走時の厩舎指数（前走の T_KYI）
+  const prks = [...new Set(cur.map((r: any) => r.prk).filter((x: string) => x && x.length === 8))] as string[];
+  const prevKyi = new Map<string, number>();
+  if (prks.length) {
+    const [pk] = await pool.query<any>(
+      `SELECT CONCAT(course_code,year_code,kai,day_code,race_num) AS rk, TRIM(blood_reg_num) AS blood, kyusha_index
+       FROM T_KYI WHERE (course_code,year_code,kai,day_code,race_num) IN (?) AND blood_reg_num IN (?)`,
+      [prks.map(k => [k.slice(0, 2), k.slice(2, 4), k.slice(4, 5), k.slice(5, 6), k.slice(6, 8)]), bloods]);
+    for (const r of pk) prevKyi.set(r.rk + r.blood, n(r.kyusha_index));
+  }
+  // 前走のレースレベル: 前走の同走馬（自分以外）が前走の後に走った最初のレースのうち、今走の日付より前のものの3着内率
+  const prevRuns = new Map<string, any>();
+  for (const r of cur) {
+    const p = (histBy.get(r.blood) ?? []).find((h: any) => h.blood + h.ymd === r.p1key);
+    if (p) prevRuns.set(r.uma, p);
+  }
+  const srids = [...new Set([...prevRuns.values()].map((p: any) => p.srid))] as string[];
+  const lvl = new Map<string, { n: number; top3: number }>();
+  if (srids.length) {
+    const [mates] = await pool.query<any>(
+      `SELECT CONCAT(course_code,year_code,kai,day_code,race_num) AS srid, TRIM(blood_num) AS blood, TRIM(ymd) AS ymd
+       FROM T_SED WHERE (course_code,year_code,kai,day_code,race_num) IN (?)`,
+      [srids.map(k => [k.slice(0, 2), k.slice(2, 4), k.slice(4, 5), k.slice(5, 6), k.slice(6, 8)])]);
+    const mateBloods = [...new Set(mates.map((m: any) => m.blood))] as string[];
+    const minYmd = mates.reduce((a: string, m: any) => (m.ymd < a ? m.ymd : a), curYmd);
+    const [later] = mateBloods.length ? await pool.query<any>(
+      `SELECT TRIM(blood_num) AS blood, TRIM(ymd) AS ymd, order_of_finish, ijou_kubun FROM T_SED
+       WHERE blood_num IN (?) AND ymd > ? AND ymd < ? ORDER BY ymd`, [mateBloods, minYmd, curYmd]) : [[]];
+    const laterBy = new Map<string, any[]>();
+    for (const l of later as any[]) { if (!laterBy.has(l.blood)) laterBy.set(l.blood, []); laterBy.get(l.blood)!.push(l); }
+    for (const [uma, p] of prevRuns) {
+      const self = cur.find((r: any) => r.uma === uma)!.blood;
+      let cnt = 0, top3 = 0;
+      for (const m of mates as any[]) {
+        if (m.srid !== p.srid || m.blood === self) continue;
+        const nx = (laterBy.get(m.blood) ?? []).find((l: any) => l.ymd > m.ymd);   // 前走の後の最初の出走（今走の日付より前のもの）
+        if (!nx) continue;
+        cnt++; if (isTop3(nx)) top3++;
+      }
+      lvl.set(uma, { n: cnt, top3 });
+    }
+  }
+  for (const r of cur) {
+    const items: string[] = [];
+    const p = prevRuns.get(r.uma);
+    out.set(r.uma, items);
+    if (!p) continue;   // 前走が JRA の成績に無い馬（新馬・地方/海外帰り等）は対象外
+    if (r.tds !== '1' && r.tds !== '2') continue;   // 障害レースは検証していないので対象外
+    const H = histBy.get(r.blood) ?? [];
+    const fin = n(p.order_of_finish);
+    const lost = fin >= 4, bad = fin >= 6;
+    const dband = (d: number) => Math.floor(d / 200) * 200;
+    const top3Where = (f: (h: any) => boolean) => H.filter(h => f(h) && isTop3(h)).length;
+    const furiMax = Math.max(...[p.furi, p.mae_furi, p.naka_furi, p.ushiro_furi].map(n).filter(x => !isNaN(x)), -1);
+    const lv = lvl.get(r.uma);
+    const dk = n(r.kyusha_index) - (prevKyi.get(r.prk + r.blood) ?? NaN);
+    const rot = n(r.rotation);
+    const flags = [
+      p.rpace === 'H' && (p.rkya === '1' || p.rkya === '2') && bad,
+      (p.c4posi === '4' || p.c4posi === '5') && lost,
+      furiMax >= 2,
+      !!lv && lv.n >= 5 && lv.top3 / lv.n >= 0.40 && lost,
+      top3Where(h => h.tds === r.tds) >= 1 && p.tds !== r.tds,
+      top3Where(h => h.tds === r.tds && dband(n(h.dist)) === dband(n(r.dist))) >= 1 && bad,
+      top3Where(h => h.lr === r.lr) >= 1 && p.lr !== r.lr && bad,
+      n(r.futan_juryo) - n(p.kinryou) <= -20 && r.wtype === '1',   // 斤量は0.1kg単位（550 = 55.0kg）
+      rot >= 8 && rot <= 11 && r.hob_r === 'A',
+      dk >= 10 && dk < 20 && bad,
+      String(p.baba ?? '').startsWith('2'),
+      n(r.dist) - n(p.dist) <= -200,
+    ];
+    flags.forEach((f, i) => { if (f) items.push(IPPEN_ITEMS[i]); });
+  }
+  return out;
+}
 
 // 自分の予想印 保存/削除: POST /api/races/:raceKey/marks  body: { uma_num, mark }
 // mark が空/null の場合は削除（未設定に戻す）

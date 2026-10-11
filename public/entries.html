@@ -305,6 +305,7 @@
         <col style="width:36px">  <!-- B（初B/再B） -->
         <col style="width:0">      <!-- EX指数全体（非表示） -->
         <col style="width:56px">  <!-- 期待値指数（2026-09-26、EX指数コースの表示位置に移動） -->
+        <col style="width:48px">  <!-- 一変シグナル（2026-10-11、scとは別運用） -->
         <col style="width:0">      <!-- 本命指数全体（非表示） -->
         <col style="width:0">      <!-- 本命指数コース（非表示。2026-09-27ユーザー指示） -->
         <col style="width:48px">  <!-- 脚質 -->
@@ -339,6 +340,7 @@
           <th rowspan="2" class="hdr-nowrap">B</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">EX指数全体</th>
           <th rowspan="2" class="group-sep col-divider hdr-nowrap" title="sc（注目馬複合シグナル）: 推奨買い目と同じ点数。指数・調教・展開予測・指数の抜け・人気とのずれ等のシグナルの合計&#10;色: 7以上=ピンク / 6=黄色 / 1〜5=無色 / 0以下=グレー&#10;先読みなしの検証（2022〜2026）で、複勝回収率が同じ基準オッズ帯の馬の平均より sc6:+7.8 / sc7:+11.4 / sc9:+15.4pt（sc0:−7.6pt）&#10;セルにマウスを乗せるとシグナルの内訳を表示。詳細は 指数帯別回収率 ページの sc 表">sc</th>
+          <th rowspan="2" class="group-sep hdr-nowrap" title="一変シグナル: 前走から状況が変わってプラスになりうる要素（12種）が4個以上=A / 3個=B（2個以下は空欄）。scとは別の「気づき」用&#10;要素: 前走ハイペースを先行して6着以下 / 前走4角で外を回って4着以下 / 前走で不利 / 前走がハイレベル戦で負け / 実績のある芝ダ・距離・回りに戻る / ハンデ戦で斤量2kg以上減 / 外厩明け / 厩舎指数の良化 / 前走が稍重 / 距離短縮&#10;色: A=ピンク / B=黄色&#10;参考（2022〜2026、穴馬=基準10倍以上の複勝回収率）: 0個60% / 2個74% / B 77.6% / A 86.4%（同オッズ帯の平均より B +8.3pt / A +16.6pt）。1レースあたり平均 A 0.7頭・B 1.3頭&#10;セルにマウスを乗せると個数と当てはまった要素を表示">一変</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命全体</th>
           <th rowspan="2" class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命指数コース</th>
           <th rowspan="2" class="group-sep hdr-nowrap">脚質</th>
@@ -828,6 +830,14 @@
       return ' style="background:#e5e7eb"';
     }
 
+    // 一変シグナル（2026-10-11、scとは別運用）: サーバーの computeIppenSignals() が返す ippen_n / ippen_items を表示。色は scBg() と同じ形（4個以上=ピンク / 3個=黄色）
+    function ippenBg(n) {
+      if (n === undefined || n === null || isNaN(n)) return '';
+      if (n >= 4) return ' style="background:#fbcfe8"';
+      if (n >= 3) return ' style="background:#fef9c3"';
+      return '';
+    }
+
     const html = rows.map((r, i) => {
       // 枠番
       const waku = parseInt(r.waku_num?.trim() || '0');
@@ -1172,6 +1182,15 @@
           if (yaji === '4' || yaji === '5') parts.push('調教矢印↓(−2)');
           const tip = `sc ${h.sc}：${parts.length ? parts.join(' / ') : 'シグナルなし'}`;
           return `<td class="group-sep col-divider"${scBg(h.sc)} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:#333">${h.sc}</span></td>`;
+        })()}
+        ${(() => {
+          // 一変シグナル（2026-10-11）
+          // 2026-10-12 ユーザー指示: 4個以上=A（ピンク）/ 3個=B（黄色）/ 2個以下は表示しない
+          const n = Number(r.ippen_n);
+          if (!(n >= 3)) return '<td class="group-sep"></td>';
+          const grade = n >= 4 ? 'A' : 'B';
+          const tip = `一変シグナル ${grade}（${n}個）：${(r.ippen_items || []).join(' / ')}`;
+          return `<td class="group-sep"${ippenBg(n)} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:#333;font-weight:700">${grade}</span></td>`;
         })()}
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>

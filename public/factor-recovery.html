@@ -102,6 +102,7 @@
     <a href="#panel-ex-wf">EX指数帯</a>
     <a href="#panel-honmei-wf">本命指数帯</a>
     <a href="#panel-sc">注目馬複合シグナル(sc)</a>
+    <a href="#panel-ippen">一変シグナル</a>
   </div>
   <!-- 2026-09-27、ユーザー指示により非表示。EX指数・本命指数・ブリンカー指数・厩指穴信頼は
        いずれもT_XXX_FACTOR_AGG系のファクター集計を「全期間プール→過去レースにも遡って適用」する設計で、
@@ -223,6 +224,28 @@
 <tr><td class="label-cell">12以上</td><td>182</td><td>22.5%</td><td>43.4%</td><td><span class="rr-100up">103.1%</span></td><td><span class="rr-80up">84.5%</span></td><td>78.7%</td><td><b>+5.7</b></td><td>-11.7</td><td>-3.3</td><td>+27.6</td><td>+26.8</td><td>-12.8</td></tr>
 </tbody></table></div>
       <div class="desc" style="margin-top:8px">sc 6以上で複勝の同オッズ平均をはっきり上回る。sc 10以上は頭数が少なく年ごとの振れが大きいので参考程度。旧表示の「sc≥6は4期間すべて単勝100%超」は、EX指数・本命指数に先読みが混ざった検証によるもので誤り（詳細: document/指数/sc_注目馬複合シグナル_仕様書.md）。</div>
+    </div>
+
+    <div class="panel" id="panel-ippen">
+      <h3>一変シグナル別成績（先読みなし検証）</h3>
+      <div class="desc">一変シグナルは、前走から状況が変わって巻き返しうる要素（前走ハイペースを先行して大敗・前走で不利・前走がハイレベル戦・実績のある芝ダ/距離/回りに戻る・ハンデ戦で斤量減・外厩明け・厩舎指数の良化・前走稍重・距離短縮など12種）の当てはまる数。出馬表では4個以上を「A」（ピンク）、3個を「B」（黄色）と表示する。sc とは別運用の「気づき」用で、単体で回収率100%超えを狙うものではない（詳細: document/指数/一変シグナル_仕様書.md）。値は先読みなしの検証値（2022〜2026年、芝ダ、新馬戦除外、前走がJRAにある馬）で、毎年「その年より前のデータだけ」で採用する要素としきい値を選び直して数えたもの。「同オッズ複勝平均」は同じ年・同じ基準オッズ帯の全馬の複勝回収率、「平均との差」はそれとの差（pt）。検証済みの固定値のため「再集計」ボタンの対象外（2026-10-12 集計）。</div>
+      <div class="desc" style="margin-bottom:6px"><b>全馬</b></div>
+      <div class="table-wrap"><table class="wf-table"><colgroup><col style="width:72px"><col style="width:72px"><col style="width:56px"><col style="width:60px"><col style="width:68px"><col style="width:68px"><col style="width:72px"><col style="width:60px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"></colgroup><thead><tr><th rowspan="2" class="hdr-nowrap">一変</th><th rowspan="2" class="hdr-nowrap">件数</th><th rowspan="2" class="hdr-nowrap">勝率</th><th rowspan="2" class="hdr-nowrap">複勝率</th><th rowspan="2">単勝<br>回収率</th><th rowspan="2">複勝<br>回収率</th><th rowspan="2">同オッズ<br>複勝平均</th><th rowspan="2">平均<br>との差</th><th colspan="5" class="hdr-nowrap">年別の差（複勝）</th></tr><tr><th class="hdr-nowrap">2022</th><th class="hdr-nowrap">2023</th><th class="hdr-nowrap">2024</th><th class="hdr-nowrap">2025</th><th class="hdr-nowrap">2026</th></tr></thead><tbody>
+<tr><td class="label-cell">A 4個〜</td><td>3,750</td><td>6.8%</td><td>21.3%</td><td><span class="rr-80up">84.6%</span></td><td><span class="rr-80up">83.0%</span></td><td>71.9%</td><td><b>+11.1</b></td><td>-7.4</td><td>+12.0</td><td>+10.8</td><td>+17.0</td><td>+10.9</td></tr>
+<tr><td class="label-cell">B 3個</td><td>10,775</td><td>6.6%</td><td>20.3%</td><td><span class="rr-80up">88.8%</span></td><td><span class="rr-80up">81.6%</span></td><td>71.6%</td><td><b>+10.1</b></td><td>+19.3</td><td>+12.6</td><td>+12.2</td><td>+4.0</td><td>+8.6</td></tr>
+<tr><td class="label-cell">2個</td><td>29,889</td><td>6.5%</td><td>20.2%</td><td><span class="rr-low">74.5%</span></td><td><span class="rr-low">76.1%</span></td><td>71.7%</td><td><b>+4.5</b></td><td>+7.5</td><td>+1.6</td><td>+6.0</td><td>+2.9</td><td>+5.5</td></tr>
+<tr><td class="label-cell">1個</td><td>63,758</td><td>7.3%</td><td>21.9%</td><td><span class="rr-low">73.0%</span></td><td><span class="rr-low">73.9%</span></td><td>72.3%</td><td><b>+1.5</b></td><td>-0.5</td><td>+1.2</td><td>+5.3</td><td>-0.1</td><td>+1.9</td></tr>
+<tr><td class="label-cell">0個</td><td>72,801</td><td>8.1%</td><td>23.9%</td><td><span class="rr-low">66.5%</span></td><td><span class="rr-low">69.0%</span></td><td>73.2%</td><td><b>-4.2</b></td><td>-1.2</td><td>-4.9</td><td>-8.9</td><td>-2.5</td><td>-4.9</td></tr>
+</tbody></table></div>
+      <div class="desc" style="margin:14px 0 6px"><b>穴馬（基準オッズ10倍以上）</b></div>
+      <div class="table-wrap"><table class="wf-table"><colgroup><col style="width:72px"><col style="width:72px"><col style="width:56px"><col style="width:60px"><col style="width:68px"><col style="width:68px"><col style="width:72px"><col style="width:60px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"><col style="width:50px"></colgroup><thead><tr><th rowspan="2" class="hdr-nowrap">一変</th><th rowspan="2" class="hdr-nowrap">件数</th><th rowspan="2" class="hdr-nowrap">勝率</th><th rowspan="2" class="hdr-nowrap">複勝率</th><th rowspan="2">単勝<br>回収率</th><th rowspan="2">複勝<br>回収率</th><th rowspan="2">同オッズ<br>複勝平均</th><th rowspan="2">平均<br>との差</th><th colspan="5" class="hdr-nowrap">年別の差（複勝）</th></tr><tr><th class="hdr-nowrap">2022</th><th class="hdr-nowrap">2023</th><th class="hdr-nowrap">2024</th><th class="hdr-nowrap">2025</th><th class="hdr-nowrap">2026</th></tr></thead><tbody>
+<tr><td class="label-cell">A 4個〜</td><td>2,728</td><td>3.3%</td><td>13.2%</td><td><span class="rr-80up">87.4%</span></td><td><span class="rr-80up">83.4%</span></td><td>69.2%</td><td><b>+14.2</b></td><td>-18.6</td><td>+20.1</td><td>+11.4</td><td>+20.3</td><td>+14.6</td></tr>
+<tr><td class="label-cell">B 3個</td><td>8,213</td><td>3.6%</td><td>13.2%</td><td><span class="rr-90up">91.6%</span></td><td><span class="rr-80up">81.1%</span></td><td>69.1%</td><td><b>+12.0</b></td><td>+24.5</td><td>+15.7</td><td>+14.9</td><td>+3.8</td><td>+10.8</td></tr>
+<tr><td class="label-cell">2個</td><td>21,973</td><td>2.6%</td><td>11.7%</td><td><span class="rr-low">71.3%</span></td><td><span class="rr-low">74.3%</span></td><td>68.8%</td><td><b>+5.6</b></td><td>+11.1</td><td>+2.7</td><td>+7.1</td><td>+3.4</td><td>+5.5</td></tr>
+<tr><td class="label-cell">1個</td><td>43,487</td><td>2.5%</td><td>10.9%</td><td><span class="rr-low">70.8%</span></td><td><span class="rr-low">70.7%</span></td><td>68.7%</td><td><b>+2.0</b></td><td>-1.0</td><td>+1.8</td><td>+7.9</td><td>-0.5</td><td>+2.2</td></tr>
+<tr><td class="label-cell">0個</td><td>45,262</td><td>2.2%</td><td>10.1%</td><td><span class="rr-low">61.5%</span></td><td><span class="rr-low">62.5%</span></td><td>68.8%</td><td><b>-6.3</b></td><td>-1.6</td><td>-7.9</td><td>-13.8</td><td>-3.4</td><td>-6.5</td></tr>
+</tbody></table></div>
+      <div class="desc" style="margin-top:8px">当てはまる数が多いほど、同じオッズ帯の馬より複勝回収率が高い（穴馬で 0個 −6.3 → A +14.2pt）。2022年は要素の選定に使えるデータが2年分しかなく、A が平均を下回った。本番の12要素（2026年時点の選定結果）を過去に当てた参考値は、穴馬で B 複勝77.6%・A 86.4%（要素選びに2026年までのデータを使うため先読みを含む）。1レース（平均13.8頭）あたり A 0.67頭・B 1.29頭。</div>
     </div>
 
     <div class="panel" id="panel-kyusha" hidden>
