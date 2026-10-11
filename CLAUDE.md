@@ -105,23 +105,7 @@
 一致しない場合は原因を突き止めてから報告する。
 
 ### 2. レンダリング実機検証（見た目の検証・省略禁止）
-テーブルの列幅・ヘッダー折り返し・横スクロールに関わる変更をしたら、必ず以下を実行してから完了報告する。
-
-```bash
-# 初回のみ（システムのChromeを使うので毎回インストール不要、使い終わったら削除）
-npm install --no-save puppeteer-core
-```
-
-Node script（例）で以下を検証する:
-- `document.createRange().selectNodeContents(th); range.getClientRects()` の `top` 座標の
-  ユニーク数 = 実際の行数（`getBoundingClientRect().height`は`rowspan`等で偽装されるため使えない）
-- ヘッダーが4文字以内なら行数が1であること、5文字以上なら1〜2であることを**全ヘッダーについて**確認する
-- 複数のビューポート幅（例: 1600px, 700px, 500px）で検証し、狭い画面でも列幅が縮小されていないか確認する
-  （`th.getBoundingClientRect().width` が意図した値のままか）
-- `table-wrap.scrollWidth > table-wrap.clientWidth` で横スクロールが実際に発生するか確認する
-- 必要なら `page.screenshot()` で目視確認も行う
-
-検証後は一時ファイル（`.scratch/`等）と`puppeteer-core`を削除する。
+テーブルの列幅・ヘッダー折り返し・横スクロール・セル内容に関わる変更をしたら、**Skill `ui-verify`（`.claude/skills/ui-verify/`）を使って**検証してから完了報告する。列数・見出しの行数（全見出し）・col指定幅とのずれ・1600/700/500pxでの縮小・横スクロール・複数テーブル間の列ずれをスクリプト1本で確認できる。手順・出力の読み方は SKILL.md を参照。
 **この実機検証をせずに「レイアウトをご確認ください」とだけ書いて報告を終えることは禁止。**
 実機検証で確認済みの場合は「Puppeteerで実機検証済み」と明記し、確認できなかった項目のみユーザーに確認を求める。
 
