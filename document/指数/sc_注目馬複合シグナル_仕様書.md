@@ -241,5 +241,5 @@ sc は出馬表・ウォッチリストを開いたときにその場で計算�
 - `document/分析レポート/注目馬複合シグナル_walk-forward検証レポート.md`（同上）
 - `document/指数/EX指数_仕様書.md`
 - `document/指数/本命指数_仕様書.md`
-- `document/指数/【廃】穴妙味指数_仕様書.md`
+- `document/【廃】指数/【廃】穴妙味指数_仕様書.md`
 - CLAUDE.md「指数/スコアETL実装時の必須チェック」15番

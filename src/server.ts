@@ -1343,7 +1343,7 @@ function leadMap(vals: number[]): number[] {
 }
 
 // 穴妙味指数グレード: entries.htmlのanabaMyomiGrade()と同一ロジック
-// IDM印なし×基準オッズ15〜30倍で、EX指数(コース)≧100→A、50〜100→B。詳細: document/指数/【廃】穴妙味指数_仕様書.md
+// IDM印なし×基準オッズ15〜30倍で、EX指数(コース)≧100→A、50〜100→B。詳細: document/【廃】指数/【廃】穴妙味指数_仕様書.md
 function anabaMyomiGrade(anaba: number, inIdm: any, odds: number): 'A' | 'B' | null {
   if (isNaN(anaba) || String(inIdm ?? '').trim() !== '') return null;
   if (isNaN(odds) || odds < 15 || odds > 30) return null;
@@ -2127,7 +2127,7 @@ app.get('/api/watchlist', async (req, res) => {
 
       // 穴妙味指数A/B（entries.htmlのanabaMyomiGrade()と同一ロジック）
       // 2026-10-05、ユーザー判断で廃止（false固定）。先読みを除くと A 単勝82.5% / B 73.1% で同オッズ帯平均（77.4%）並み。
-      // 変数・APIフィールドは残置。詳細: document/指数/【廃】穴妙味指数_仕様書.md
+      // 変数・APIフィールドは残置。詳細: document/【廃】指数/【廃】穴妙味指数_仕様書.md
       const myomiGrade = anabaMyomiGrade(ex ?? NaN, r.in_idm, odds ?? NaN);
       const matchMyomi = false;
 
@@ -2726,7 +2726,7 @@ app.post('/api/furi-etl', (req, res) => {
 // 他の指数と異なり馬ごとのスコアテーブルは持たず、T_KYUSHA_FACTOR_AGG（調教師別集計）を
 // getTrainerGradeMap()・computeFactorRecovery()がクエリ時にS〜F判定するため、
 // 完了後はその2つのメモリキャッシュをクリアしてグレードを即時反映させる。
-// 設計: document/指数/【廃】厩指穴信頼_仕様書.md
+// 設計: document/【廃】指数/【廃】厩指穴信頼_仕様書.md
 // ────────────────────────────────────────────────────────────────────────────
 app.post('/api/kyusha-etl', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');

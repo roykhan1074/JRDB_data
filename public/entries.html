@@ -857,7 +857,7 @@
       const goalMark  = rankMarkHtml(goalRanks[i]);
 
       // ブリンカー（1:初装着 2:再装着）。JRDBの装着情報をそのまま表示する
-      // （ブリンカー指数は2026-10-05廃止。document/指数/【廃】ブリンカー指数_仕様書.md）
+      // （ブリンカー指数は2026-10-05廃止。document/【廃】指数/【廃】ブリンカー指数_仕様書.md）
       const blinkerType  = String(r.blinker ?? '').trim();
       const blinkerHtml = blinkerType === '1' ? '<span style="font-weight:700;color:#1d4ed8">初B</span>'
                         : blinkerType === '2' ? '<span style="font-weight:700;color:#1d4ed8">再B</span>'
