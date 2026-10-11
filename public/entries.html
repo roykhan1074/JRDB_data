@@ -314,7 +314,8 @@
         <col style="width:0">      <!-- EX指数全体（非表示） -->
         <col style="width:56px">  <!-- 期待値指数（2026-09-26、EX指数コースの表示位置に移動） -->
         <col style="width:48px">  <!-- 一変シグナル（2026-10-11、scとは別運用） -->
-        <col id="col-jump" style="width:0">  <!-- 障害指数（2026-10-12、障害戦のみ）/ 新馬指数（2026-10-13、新馬戦のみ）。該当レースのときだけ 48px、それ以外は非表示 -->
+        <col id="col-jump" style="width:0">  <!-- 障害指数／新馬指数のランク（A/B/E）。障害戦・新馬戦のときだけ 25px（情報印の印の列と同じ）、それ以外は非表示 -->
+        <col id="col-jump-idx" style="width:0">  <!-- 障害指数／新馬指数の点数。障害戦・新馬戦のときだけ 36px（情報印の指数の列と同じ）、それ以外は非表示（2026-10-13） -->
         <col style="width:0">      <!-- 本命指数全体（非表示） -->
         <col style="width:0">      <!-- 本命指数コース（非表示。2026-09-27ユーザー指示） -->
         <col style="width:48px">  <!-- 脚質 -->
@@ -350,7 +351,7 @@
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">EX指数全体</th>
           <th rowspan="2" class="group-sep col-divider hdr-nowrap" title="sc（注目馬複合シグナル）: 推奨買い目と同じ点数。指数・調教・展開予測・指数の抜け・人気とのずれ等のシグナルの合計&#10;色: 7以上=ピンク / 6=黄色 / 1〜5=無色 / 0以下=グレー&#10;先読みなしの検証（2022〜2026）で、複勝回収率が同じ基準オッズ帯の馬の平均より sc6:+7.8 / sc7:+11.4 / sc9:+15.4pt（sc0:−7.6pt）&#10;セルにマウスを乗せるとシグナルの内訳を表示。詳細は 指数帯別回収率 ページの sc 表">sc</th>
           <th rowspan="2" class="group-sep hdr-nowrap" title="一変シグナル: 前走から状況が変わってプラスになりうる要素（12種）が4個以上=A / 3個=B（2個以下は空欄）。scとは別の「気づき」用&#10;要素: 前走ハイペースを先行して6着以下 / 前走4角で外を回って4着以下 / 前走で不利 / 前走がハイレベル戦で負け / 実績のある芝ダ・距離・回りに戻る / ハンデ戦で斤量2kg以上減 / 外厩明け / 厩舎指数の良化 / 前走が稍重 / 距離短縮&#10;色: A=ピンク / B=黄色&#10;参考（2022〜2026、穴馬=基準10倍以上の複勝回収率）: 0個60% / 2個74% / B 77.6% / A 86.4%（同オッズ帯の平均より B +8.3pt / A +16.6pt）。1レースあたり平均 A 0.7頭・B 1.3頭&#10;セルにマウスを乗せると個数と当てはまった要素を表示">一変</th>
-          <th rowspan="2" id="th-jump" class="group-sep hdr-nowrap" style="width:0;padding:0;border:0;overflow:hidden;font-size:0" title="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-jump="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-newbie="新馬指数（新馬戦のみ）: 新馬戦の成績から選んだ29要素の点数（+2〜−2）の合計をランク表示&#10;A=+6点以上（上位約7%）ピンク / B=+5点（上位約7〜12%）黄色 / E=−4点以下（下位約13%）グレー / それ以外は空欄&#10;主な要素: プラス=追切指数3位以内・社台F/追分/白老生産・新馬で回収率の高い父/厩舎・入厩30日以内・1週前追切1位・外枠 / マイナス=追切/仕上/テン指数が下位・調教量評価A・調教矢印↓・厩舎評価4・IDMの割に人気・新馬成績の悪い生産者/馬主&#10;参考（2021〜2026の複勝回収率）: A 約101% / B 100% / E 36%。先読みなしの検証では点数のレース内1位が複勝約93%&#10;セルにマウスを乗せると点数と内訳を表示">障害</th>
+          <th rowspan="2" colspan="2" id="th-jump" class="group-sep hdr-nowrap" style="width:0;padding:0;border:0;overflow:hidden;font-size:0" title="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-jump="障害指数（障害戦のみ）: 障害戦の成績から選んだ34要素の点数（+2〜−2）の合計をランク表示&#10;A=+4点以上（上位約6%）ピンク / B=+3点（上位約6〜10%）黄色 / E=−6点以下（下位約22%）グレー / それ以外は空欄&#10;主な要素: プラス=4歳・調教量評価A・見習い騎手・前走障害で大敗・激走指数3位以内・前走と同じ競馬場・中1〜2週 / マイナス=初障害・中10〜19週・重賞・逃げ・外枠・障害成績の良い騎手/厩舎（人気になりすぎる）&#10;参考（2021〜2026の複勝回収率）: A 143% / B 97% / E 53%。先読みなしの検証では点数のレース内1位が複勝約97%&#10;セルにマウスを乗せると点数と内訳を表示" data-title-newbie="新馬指数（新馬戦のみ）: 新馬戦の成績から選んだ29要素の点数（+2〜−2）の合計をランク表示&#10;A=+6点以上（上位約7%）ピンク / B=+5点（上位約7〜12%）黄色 / E=−4点以下（下位約13%）グレー / それ以外は空欄&#10;主な要素: プラス=追切指数3位以内・社台F/追分/白老生産・新馬で回収率の高い父/厩舎・入厩30日以内・1週前追切1位・外枠 / マイナス=追切/仕上/テン指数が下位・調教量評価A・調教矢印↓・厩舎評価4・IDMの割に人気・新馬成績の悪い生産者/馬主&#10;参考（2021〜2026の複勝回収率）: A 約101% / B 100% / E 36%。先読みなしの検証では点数のレース内1位が複勝約93%&#10;セルにマウスを乗せると点数と内訳を表示">障害</th>
           <th rowspan="2" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命全体</th>
           <th rowspan="2" class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0">本命指数コース</th>
           <th rowspan="2" class="group-sep hdr-nowrap">脚質</th>
@@ -804,7 +805,7 @@
     if (!rows || !rows.length) {
       document.getElementById('table-wrap').style.display = '';
       document.getElementById('tbody').innerHTML =
-        '<tr><td colspan="33" style="text-align:center;padding:32px;color:#aaa">データがありません</td></tr>';
+        '<tr><td colspan="34" style="text-align:center;padding:32px;color:#aaa">データがありません</td></tr>';
       return;
     }
 
@@ -849,7 +850,8 @@
     const special = isJumpRace ? { label: '障害', name: '障害指数', ptsKey: 'jump_pts', itemsKey: 'jump_items', a: 4, b: 3, e: -6 }
                   : isNewbieRace ? { label: '新馬', name: '新馬指数', ptsKey: 'newbie_pts', itemsKey: 'newbie_items', a: 6, b: 5, e: -4 } : null;
     const thSpecial = document.getElementById('th-jump');
-    document.getElementById('col-jump').style.width = special ? '48px' : '0';
+    document.getElementById('col-jump').style.width = special ? '25px' : '0';
+    document.getElementById('col-jump-idx').style.width = special ? '36px' : '0';
     thSpecial.setAttribute('style', special ? '' : 'width:0;padding:0;border:0;overflow:hidden;font-size:0');
     if (special) {
       thSpecial.textContent = special.label;
@@ -1230,14 +1232,18 @@
         })()}
         ${(() => {
           // 列#10: 障害指数（障害戦のみ）/ 新馬指数（新馬戦のみ）
-          if (!special) return '<td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>';
+          if (!special) return '<td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td><td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>';
           const pv = r[special.ptsKey];
           const p = pv === null || pv === undefined ? NaN : Number(pv);
-          if (isNaN(p)) return '<td class="group-sep"></td>';
+          if (isNaN(p)) return '<td class="group-sep mark-col"></td><td class="idx-col"></td>';
           const jg = specialGrade(p);
           const tip = `${special.name} ${p > 0 ? '+' : ''}${p}点${jg ? `（${jg.g}）` : ''}：${(r[special.itemsKey] || []).join(' / ') || '該当なし'}`;
-          if (!jg) return `<td class="group-sep" data-tip="${tip.replace(/"/g, '&quot;')}"></td>`;
-          return `<td class="group-sep"${jg.style} data-tip="${tip.replace(/"/g, '&quot;')}"><span style="color:${jg.color};font-weight:700">${jg.g}</span></td>`;
+          const tipAttr = ` data-tip="${tip.replace(/"/g, '&quot;')}"`;
+          const bg = jg ? jg.style : '';
+          const mark = jg ? `<span style="color:${jg.color};font-weight:700">${jg.g}</span>` : '';
+          // 点数は情報印・IDM印の指数と同じ見た目（.idx）。2026-10-13 ユーザー指示で + は付けない（マイナスとの比較で見やすいため）
+          const num = `<span class="idx">${p}</span>`;
+          return `<td class="group-sep mark-col"${bg}${tipAttr}>${mark}</td><td class="idx-col"${bg}${tipAttr}>${num}</td>`;
         })()}
         <td style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
         <td class="group-sep" style="width:0;padding:0;border:0;overflow:hidden;font-size:0"></td>
