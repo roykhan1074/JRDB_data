@@ -598,6 +598,19 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
      ORDER BY CAST(k.uma_num AS UNSIGNED)`,
     [course_code, year_code, kai, day_code, race_num]
   );
+  // 障害指数（障害戦のみ。仕様: document/指数/障害指数_仕様書.md）
+  try {
+    const jump = await computeJumpIndex(course_code, year_code, kai, day_code, race_num);
+    if (jump) {
+      for (const r of rows) {
+        const j = jump.get(String(r.uma_num).trim());
+        r.jump_pts = j ? j.pts : null;
+        r.jump_items = j ? j.items : [];
+      }
+    }
+  } catch (e) {
+    console.error('[jump] 計算失敗', e);
+  }
   // 一変シグナル（scとは別運用。仕様: document/指数/一変シグナル_仕様書.md）
   try {
     const ippen = await computeIppenSignals(course_code, year_code, kai, day_code, race_num);
@@ -611,6 +624,115 @@ app.get('/api/races/:raceKey/entries', async (req, res) => {
   }
   res.json({ source: 'entries', rows });
 });
+
+// ── 障害指数: 障害戦の馬に、34要素の点数（+2〜−2）を合計して返す。障害戦以外は null。
+// 要素と点数は python/research/jump_wf.py の2026年時点の選定結果（固定ルール）。参照計算: python/research/jump_fixed.py（突き合わせ済み）。
+// すべてレース前に分かる情報（今走の T_KYI/T_BAC/T_CYB/T_UKC、今走より前の T_SED）だけを使う。
+async function computeJumpIndex(course_code: string, year_code: string, kai: string, day_code: string, race_num: string): Promise<Map<string, { pts: number; items: string[] }> | null> {
+  const n = (v: any): number => { const x = parseFloat(String(v ?? '').trim()); return isNaN(x) ? NaN : x; };
+  const s = (v: any): string => String(v ?? '').trim();
+  const isTop3 = (r: any) => (s(r.ijou_kubun) === '0' || s(r.ijou_kubun) === '') && n(r.order_of_finish) >= 1 && n(r.order_of_finish) <= 3;
+  const [cur] = await pool.query<any>(
+    `SELECT TRIM(k.uma_num) AS uma, TRIM(k.blood_reg_num) AS blood, k.idm, k.gekiso_index, k.sogo_index, k.chokyo_index,
+            TRIM(k.kyakushitsu) AS kya, TRIM(k.rotation) AS rotation, TRIM(k.minarai_kubun) AS minarai, CAST(k.waku_num AS UNSIGNED) AS waku,
+            TRIM(k.kishu_code) AS jockey, TRIM(k.trainer_code) AS trainer, TRIM(k.nyukyu_hashiri) AS nyu_n,
+            c.oi_index, TRIM(c.chokyo_ryo_hyoka) AS ryo, TRIM(c.course_sho) AS c_sho,
+            TRIM(b.ymd) AS ymd, TRIM(b.course_code) AS course, TRIM(b.class) AS cls, TRIM(b.grade) AS grade, TRIM(b.tds_code) AS tds,
+            TRIM(u.birthdate) AS birth
+     FROM T_KYI k
+     JOIN T_BAC b ON b.course_code=k.course_code AND b.year_code=k.year_code AND b.kai=k.kai AND b.day_code=k.day_code AND b.race_num=k.race_num
+     LEFT JOIN T_CYB c ON c.course_code=k.course_code AND c.year_code=k.year_code AND c.kai=k.kai AND c.day_code=k.day_code AND c.race_num=k.race_num AND c.uma_num=k.uma_num
+     LEFT JOIN T_UKC u ON u.blood_reg_num=k.blood_reg_num
+     WHERE k.course_code=? AND k.year_code=? AND k.kai=? AND k.day_code=? AND k.race_num=?`,
+    [course_code, year_code, kai, day_code, race_num]);
+  if (!cur.length || cur[0].tds !== '3') return null;
+  const curYmd: string = cur[0].ymd;
+  const heads = cur.length;
+  // レース内の順位（大きい方が上位、同値は同順位=min）
+  const rank = (key: string) => {
+    const vals = cur.map((r: any) => n(r[key]));
+    return vals.map((v: number) => isNaN(v) ? NaN : 1 + vals.filter((w: number) => !isNaN(w) && w > v).length);
+  };
+  const rIdm = rank('idm'), rGeki = rank('gekiso_index'), rSogo = rank('sogo_index'), rCho = rank('chokyo_index'), rOi = rank('oi_index');
+  // 馬の過去成績（今走より前）
+  const bloods: string[] = cur.map((r: any) => r.blood).filter(Boolean);
+  const [hist] = bloods.length ? await pool.query<any>(
+    `SELECT TRIM(blood_num) AS blood, TRIM(ymd) AS ymd, TRIM(tds_code) AS tds, TRIM(course_code) AS course, TRIM(class) AS cls,
+            order_of_finish, ijou_kubun, win_diff FROM T_SED WHERE blood_num IN (?) AND ymd < ? ORDER BY ymd`, [bloods, curYmd]) : [[]];
+  const histBy = new Map<string, any[]>();
+  for (const h of hist as any[]) { if (!histBy.has(h.blood)) histBy.set(h.blood, []); histBy.get(h.blood)!.push(h); }
+  // 騎手・厩舎の障害成績（今走の日付より前）
+  const pstats = async (col: 'jockey_code' | 'trainer_code', codes: string[]) => {
+    const m = new Map<string, { n: number; t3: number; pl: number }>();
+    if (!codes.length) return m;
+    const [rs] = await pool.query<any>(
+      `SELECT TRIM(${col}) AS code, COUNT(*) AS n,
+              SUM((TRIM(ijou_kubun) IN ('0','') OR ijou_kubun IS NULL) AND CAST(order_of_finish AS SIGNED) BETWEEN 1 AND 3) AS t3,
+              SUM(COALESCE(place, 0)) AS pl
+       FROM T_SED WHERE tds_code='3' AND ymd < ? AND ${col} IN (?) GROUP BY TRIM(${col})`, [curYmd, codes]);
+    for (const r of rs) m.set(r.code, { n: Number(r.n), t3: Number(r.t3), pl: Number(r.pl) });
+    return m;
+  };
+  const jSt = await pstats('jockey_code', [...new Set(cur.map((r: any) => r.jockey).filter(Boolean))] as string[]);
+  const tSt = await pstats('trainer_code', [...new Set(cur.map((r: any) => r.trainer).filter(Boolean))] as string[]);
+  const CLS: Record<string, number> = { A1: 0, A2: 0, A3: 0, '05': 1, '10': 2, '16': 3, OP: 4 };
+  const out = new Map<string, { pts: number; items: string[] }>();
+  cur.forEach((r: any, i: number) => {
+    const H = histBy.get(r.blood) ?? [];
+    const cJump = H.filter(h => h.tds === '3').length;
+    const first = cJump === 0;
+    const p1 = H.length ? H[H.length - 1] : null, p2 = H.length >= 2 ? H[H.length - 2] : null;
+    const pj = !!p1 && p1.tds === '3', pf = !!p1 && (p1.tds === '1' || p1.tds === '2');
+    const pfin = p1 ? n(p1.order_of_finish) : NaN;
+    const flatCls = H.filter(h => h.tds === '1' || h.tds === '2').map(h => CLS[s(h.cls)]).filter(v => v !== undefined);
+    const fcm = flatCls.length ? Math.max(...flatCls) : NaN;
+    const rot = n(r.rotation);
+    const age = Number(curYmd.slice(0, 4)) - n(s(r.birth).slice(0, 4));
+    // T_BAC.grade: 1〜3=G1〜G3, 4=重賞, 5=特別（OP特別は重賞ではない）
+    const op = r.cls === 'OP', graded = ['1', '2', '3', '4'].includes(s(r.grade));
+    const j = jSt.get(r.jockey), t = tSt.get(r.trainer);
+    const rules: [boolean, number, string][] = [
+      [age === 4, 2, '4歳'],
+      [r.ryo === 'A', 2, '調教量評価A'],
+      [s(r.minarai) !== '', 2, '見習い騎手'],
+      [pj && pfin >= 6, 1, '前走障害で6着以下'],
+      [rGeki[i] <= 3, 1, '激走指数レース内3位以内'],
+      [pj && p1.course === r.course, 1, '前走と同じ競馬場'],
+      [pj && n(p1.win_diff) >= 20, 1, '前走障害で2秒以上負け'],
+      [rot >= 1 && rot <= 2, 1, '中1〜2週'],
+      [rIdm[i] >= heads - 2, 1, 'IDM下位(レース内で下から3頭)'],
+      [rCho[i] === 1, 1, '調教指数1位'],
+      [rSogo[i] === 1, 1, '総合指数1位'],
+      [cJump >= 2 && cJump <= 4, 1, '障害3〜5戦目'],
+      [rIdm[i] === 3, -1, 'IDMレース内3位'],
+      [r.course === '03', -1, '福島'],
+      [rot >= 6 && rot <= 9, -1, '中6〜9週'],
+      [!!j && j.n >= 50 && j.t3 / j.n >= 0.30, -1, '騎手の障害3着内率30%以上'],
+      [fcm >= 2, -1, '平地で2勝クラス以上を走った'],
+      [n(r.nyu_n) === 1, -1, '入厩1走目'],
+      [n(r.c_sho) >= 1, -1, '障害練習1回以上'],
+      [pj && pfin === 1, -1, '前走障害で1着'],
+      [!!j && j.n >= 50 && j.pl / j.n >= 90, -1, '騎手の障害複勝回収率90%以上'],
+      [!!p2 && p2.tds === '3' && n(p2.order_of_finish) <= 3 && pj && pfin >= 4, -1, '2走前障害3着内→前走障害4着以下'],
+      [age === 7, -1, '7歳'],
+      [Number(r.waku) >= 7, -1, '外枠(7〜8枠)'],
+      [!!t && t.n >= 30 && t.t3 / t.n >= 0.30, -1, '厩舎の障害3着内率30%以上'],
+      [r.kya === '1', -1, '脚質 逃げ'],
+      [r.course === '05', -1, '東京'],
+      [rOi[i] >= heads - 2, -1, '追切指数レース内下位(下から3頭)'],
+      [op && graded, -2, '障害重賞'],
+      [rot >= 10 && rot <= 19, -2, '中10〜19週'],
+      [pf && first, -2, '前走平地(初障害)'],
+      [first, -2, '初障害'],
+      [first && fcm >= 2, -2, '初障害×平地2勝クラス以上'],
+      [first && fcm === 0, -2, '初障害×平地未勝利のみ'],
+    ];
+    let pts = 0; const items: string[] = [];
+    for (const [f, p, lab] of rules) if (f) { pts += p; items.push(`${lab}(${p > 0 ? '+' : ''}${p})`); }
+    out.set(r.uma, { pts, items });
+  });
+  return out;
+}
 
 // ── 一変シグナル: 前走から状況が変わってプラスになりうる要素（12種）の当てはまる数と内訳を返す。
 // すべてレース前に分かる情報（今走の T_KYI/T_BAC、前走の T_KYI/T_SED、今走より前の T_SED）だけを使う。
