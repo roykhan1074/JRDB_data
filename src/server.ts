@@ -273,17 +273,57 @@ app.get('/api/races', async (req, res) => {
     return;
   }
   const params: string[] = [date];
-  let sql = `SELECT course_code, year_code, kai, day_code, race_num,
-                    race_name, race_name_9char, distance, tds_code,
-                    grade, heads, start_time, data_kubun
-             FROM T_BAC WHERE ymd = ?`;
+  let sql = `SELECT b.course_code, b.year_code, b.kai, b.day_code, b.race_num,
+                    b.race_name, b.race_name_9char, b.distance, b.tds_code,
+                    b.grade, b.heads, b.start_time, b.data_kubun,
+                    rs.status AS my_status
+             FROM T_BAC b
+             LEFT JOIN T_RACE_STATUS rs
+               ON rs.course_code = b.course_code AND rs.year_code = b.year_code
+              AND rs.kai = b.kai AND rs.day_code = b.day_code AND rs.race_num = b.race_num
+             WHERE b.ymd = ?`;
   if (course && /^\d{2}$/.test(course)) {
-    sql += ' AND course_code = ?';
+    sql += ' AND b.course_code = ?';
     params.push(course);
   }
-  sql += ' ORDER BY course_code, CAST(race_num AS UNSIGNED)';
+  sql += ' ORDER BY b.course_code, CAST(b.race_num AS UNSIGNED)';
   const [rows] = await pool.query<any>(sql, params);
   res.json(rows);
+});
+
+// レースの自分用ステータス 保存/削除: POST /api/races/:raceKey/status  body: { status }
+// status: 1=検討 2=勝負 3=購入済。空/null の場合は削除（未設定に戻す）
+app.post('/api/races/:raceKey/status', async (req, res) => {
+  const { raceKey } = req.params;
+  if (!/^\d{5}[0-9a-f]\d{2}$/i.test(raceKey)) {
+    res.status(400).json({ error: '無効なレースキーです' });
+    return;
+  }
+  const { status } = req.body as { status?: string | null };
+  const keyParts = [raceKey.slice(0, 2), raceKey.slice(2, 4), raceKey.slice(4, 5), raceKey.slice(5, 6), raceKey.slice(6, 8)];
+  try {
+    if (!status) {
+      await pool.query(
+        `DELETE FROM T_RACE_STATUS WHERE course_code=? AND year_code=? AND kai=? AND day_code=? AND race_num=?`,
+        keyParts
+      );
+      res.json({ ok: true });
+      return;
+    }
+    if (!/^[1-3]$/.test(status)) {
+      res.status(400).json({ error: 'ステータスの値が不正です' });
+      return;
+    }
+    await pool.query(
+      `INSERT INTO T_RACE_STATUS (course_code, year_code, kai, day_code, race_num, status)
+       VALUES (?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE status = VALUES(status)`,
+      [...keyParts, status]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 騎手別 基準人気帯ごと平均着順偏差: GET /api/jockey-ninki-stats
@@ -3458,6 +3498,16 @@ app.listen(PORT, () => {
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (course_code, year_code, kai, day_code, race_num, uma_num)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='自分の予想印（ユーザー入力・分析用）'`
+  ).catch(() => {});
+  // レース検索画面の自分用ステータス（検討/勝負/購入済）。races API の LEFT JOIN が失敗しないよう起動時に作成
+  pool.query(
+    `CREATE TABLE IF NOT EXISTS T_RACE_STATUS (
+      course_code CHAR(2) NOT NULL, year_code CHAR(2) NOT NULL,
+      kai CHAR(1) NOT NULL, day_code CHAR(1) NOT NULL, race_num CHAR(2) NOT NULL,
+      status CHAR(1) NOT NULL COMMENT '1=検討 2=勝負 3=購入済',
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (course_code, year_code, kai, day_code, race_num)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='レースの自分用ステータス（レース検索画面で入力）'`
   ).catch(() => {});
   // デフォルト年範囲のキャッシュを起動直後にバックグラウンドで生成
   setTimeout(() => {

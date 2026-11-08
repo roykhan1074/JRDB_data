@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-export const JRDB_BASE_URL = process.env.JRDB_BASE_URL ?? 'https://www.jrdb.com/member/datazip';
+export const JRDB_BASE_URL = process.env.JRDB_BASE_URL ?? 'https://jrdb.com/member/datazip';
 export const JRDB_USER     = process.env.JRDB_USER ?? '';
 export const JRDB_PASS     = process.env.JRDB_PASS ?? '';
 export const DATA_DIR      = process.env.DATA_DIR

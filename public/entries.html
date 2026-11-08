@@ -287,6 +287,32 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-msg { background: #fff; border-radius: 8px; padding: 40px; text-align: center; color: #c0392b; }
+
+    /* PDF出力ボタン（header は nav.js が中身を差し替えるため、レース番号ボタンの行の右端に置く） */
+    .print-btn {
+      margin-left: auto; padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: .82rem; font-family: inherit;
+      color: #374151; white-space: nowrap; transition: background .1s;
+    }
+    .print-btn:hover { background: #f3f4f6; }
+
+    /* 印刷・PDF出力（A4横）。表は実測で最大約1351px（障害戦・新馬戦）、A4横の印刷幅は約1077px（285mm）なので 0.78 倍に縮める */
+    @page { size: A4 landscape; margin: 6mm; }
+    @media print {
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { background: #fff !important; min-height: 0; }
+      header, .site-nav, .race-nav-btn, .print-btn, #ts-tip { display: none !important; }
+      .rh-nav { padding: 6px 16px; }
+      .rh-course-label { border-right: none; }
+      main { max-width: none; margin: 0; padding: 0; zoom: 0.78; }
+      .race-header-card { box-shadow: none; border: 1px solid #e5e7eb; margin-bottom: 8px; }
+      .table-wrap { overflow: visible; }
+      table { box-shadow: none; }
+      thead { display: table-header-group; }
+      tbody tr { break-inside: avoid; }
+      tbody tr:hover { background: transparent; }
+      #betting-wrap { break-inside: avoid; }
+    }
   </style>
   <link rel="stylesheet" href="/race-insight.css">
 </head>
@@ -761,6 +787,17 @@
     }
   }
 
+  let printTitle = '';
+  let screenTitle = '';
+  window.addEventListener('beforeprint', () => {
+    if (!printTitle) return;
+    screenTitle = document.title;
+    document.title = printTitle;
+  });
+  window.addEventListener('afterprint', () => {
+    if (screenTitle) document.title = screenTitle;
+  });
+
   function renderRaceHeader(raceList, race, favRel) {
     const course    = COURSE_NAME[race.course_code] || race.course_code;
     const rnum      = parseInt(race.race_num);
@@ -772,6 +809,8 @@
     const dir       = race.migihidari === '1' ? '右' : race.migihidari === '2' ? '左' : '';
     const heads     = race.heads ? parseInt(race.heads) + '頭' : '—';
     document.title  = `${name} ${course}${rnum}R 出馬表 - RACE INSIGHT`;
+    // PDF保存時の既定ファイル名（Chrome は印刷中の document.title をファイル名にする）。例: 20261108_東京07R_2歳新馬
+    printTitle = `${race.ymd}_${course}${String(rnum).padStart(2,'0')}R_${name}`.replace(/[\\/:*?"<>|\s]+/g, '');
 
     // ナビボタン
     const sorted = [...raceList].sort((a,b) => parseInt(a.race_num)-parseInt(b.race_num));
@@ -784,7 +823,7 @@
     document.getElementById('race-header-wrap').innerHTML = `
       <div class="race-header-card">
         <div class="race-header-left">
-          <div class="rh-nav"><span class="rh-course-label">${course}</span>${navBtns}</div>
+          <div class="rh-nav"><span class="rh-course-label">${course}</span>${navBtns}<button class="print-btn" onclick="window.print()" title="印刷画面で送信先に「PDFに保存」を選ぶとPDFになります（A4横）">PDF出力</button></div>
           <div class="rh-info">
             <div class="race-rnum">${rnum}R</div>
             <div class="race-main">

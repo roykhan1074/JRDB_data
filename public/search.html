@@ -76,6 +76,16 @@
     .btn-entries.no-result  { background: #dbeafe; color: #1d4ed8; }
     .btn-entries.no-result:hover  { background: #bfdbfe; }
 
+    /* 自分用ステータス（検討/勝負/購入済）。色は CLAUDE.md のセル背景色規約から流用 */
+    .race-status {
+      padding: 3px 6px; border: 1.5px solid #ddd; border-radius: 5px;
+      font-size: .78rem; background: #fff; cursor: pointer; outline: none;
+    }
+    .race-status:focus { border-color: #3498db; }
+    .race-status.st-1 { background: #fef9c3; }
+    .race-status.st-2 { background: #fbcfe8; font-weight: 700; }
+    .race-status.st-3 { background: #e5e7eb; color: #6b7280; }
+
     .loading { text-align: center; padding: 40px; color: #999; }
     .spinner {
       width: 28px; height: 28px; border: 3px solid #ddd;
@@ -154,6 +164,35 @@
     return r.course_code + r.year_code + r.kai + r.day_code + r.race_num;
   }
 
+  // 自分用ステータス（1=検討 2=勝負 3=購入済）。DB（T_RACE_STATUS）に保存
+  const STATUS_OPTIONS = [['', '—'], ['1', '検討'], ['2', '勝負'], ['3', '購入済']];
+
+  function statusSelectHtml(key, status) {
+    const cur = status || '';
+    const opts = STATUS_OPTIONS.map(([v, label]) =>
+      `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`).join('');
+    return `<select class="race-status${cur ? ' st-' + cur : ''}" data-key="${key}" data-prev="${cur}" onchange="saveStatus(this)">${opts}</select>`;
+  }
+
+  async function saveStatus(sel) {
+    const key = sel.dataset.key;
+    const val = sel.value;
+    sel.className = 'race-status' + (val ? ' st-' + val : '');
+    try {
+      const res = await fetch(`/api/races/${key}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: val || null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+      sel.dataset.prev = val;
+    } catch (e) {
+      alert('ステータスの保存に失敗しました: ' + e.message);
+      sel.value = sel.dataset.prev;
+      sel.className = 'race-status' + (sel.value ? ' st-' + sel.value : '');
+    }
+  }
+
   async function searchRaces() {
     const isoDate = document.getElementById('input-date').value;
     const course  = document.getElementById('input-course').value;
@@ -201,7 +240,7 @@
         <div class="course-label">🏟 ${COURSE_NAME[code] || code}　${dateDisp}</div>
         <table class="race-table">
           <thead><tr>
-            <th>R</th><th>発走</th><th>レース名</th><th>距離</th><th>頭数</th><th></th>
+            <th>R</th><th>状態</th><th>発走</th><th>レース名</th><th>距離</th><th>頭数</th><th></th>
           </tr></thead>
           <tbody>
             ${list.map(r => {
@@ -214,6 +253,7 @@
               const btnLabel = '出馬表を見る';
               return `<tr>
                 <td><strong>${parseInt(r.race_num)}R</strong></td>
+                <td>${statusSelectHtml(key, r.my_status)}</td>
                 <td>${fmtTime(r.start_time)}</td>
                 <td>${name}${gradeLabel ? ` <span class="badge badge-grade1">${gradeLabel}</span>` : ''}</td>
                 <td>${tds ? `<span class="badge ${tdsBadge}">${tds}</span>` : ''} ${r.distance?.trim() ? r.distance.trim()+'m' : '—'}</td>
